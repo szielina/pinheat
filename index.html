@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>pinheat</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0f1115; --fg:#e6e6e6; --muted:#8b93a1; --line:#262b34; }
+    body { margin:0; font:14px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+    main { display:grid; grid-template-columns:minmax(0,640px) minmax(260px,1fr); gap:24px; max-width:1100px; margin:0 auto; padding:24px; }
+    @media (max-width:800px) { main { grid-template-columns:1fr; } }
+    h1 { font-size:18px; margin:0 0 4px; }
+    .muted { color:var(--muted); }
+    #stage { position:relative; width:100%; aspect-ratio:1; margin:8px 0; }
+    canvas { width:100%; height:100%; display:block; image-rendering:pixelated; background:#000; cursor:crosshair; }
+    #rect { position:absolute; box-sizing:border-box; border:1px solid #0ff; background:rgba(0,255,255,.12); pointer-events:none; display:none; }
+    fieldset { border:1px solid var(--line); border-radius:6px; margin:0 0 12px; padding:8px 12px; }
+    legend { color:var(--muted); padding:0 4px; }
+    label { display:block; }
+    select, button { font:inherit; }
+    footer { grid-column:1 / -1; color:var(--muted); font-size:12px; border-top:1px solid var(--line); padding-top:12px; }
+  </style>
+</head>
+<body>
+<main>
+  <section>
+    <h1>pinheat</h1>
+    <div id="src" class="muted"></div>
+    <div id="stage"><canvas id="map"></canvas><div id="rect"></div></div>
+    <div id="hover" class="muted">Hover over the map.</div>
+  </section>
+  <aside>
+    <fieldset><legend>Projection</legend><select id="proj"></select></fieldset>
+    <fieldset><legend>Scale</legend>
+      <label><input type="radio" name="s" value="linear"> linear</label>
+      <label><input type="radio" name="s" value="log"> logarithmic</label>
+      <label><input type="radio" name="s" value="gamma"> gamma</label>
+      <label>gamma <input type="range" id="gamma" min="0.1" max="1.5" step="0.05"></label>
+    </fieldset>
+    <fieldset><legend>Tags (the rest is dimmed)</legend><div id="tags"></div></fieldset>
+    <fieldset><legend>Number of attempts</legend>
+      <input type="range" id="tries" min="0" value="100" style="width:100%">
+      <div id="triesOut"></div>
+    </fieldset>
+    <fieldset><legend>Selection</legend>
+      <div id="sel"></div>
+      <button id="clear">Clear</button>
+    </fieldset>
+  </aside>
+  <footer>These are passwords from data breaches (HIBP), not a representative sample of PINs in use. Counts are occurrences, not unique people. Everything is computed locally in your browser.</footer>
+</main>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
