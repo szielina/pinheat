@@ -1,32 +1,50 @@
-export type ScaleKind = 'linear' | 'log' | 'gamma';
+export type ScaleKind = 'linear' | 'gamma' | 'log' | 'rank';
+export const SCALE_KINDS: ScaleKind[] = ['linear', 'gamma', 'log', 'rank'];
 
-export function normalizer(kind: ScaleKind, max: number, gamma: number): (count: number) => number {
-  if (max <= 0) return () => 0;
-  switch (kind) {
-    case 'linear':
-      return (c) => c / max;
-    case 'log': {
-      const denom = Math.log1p(max);
-      return (c) => Math.log1p(c) / denom;
-    }
-    case 'gamma':
-      return (c) => (c / max) ** gamma;
-  }
+export interface ScaleParams {
+  kind: ScaleKind;
+  gamma: number;
+  /** Count at which linear / gamma saturate (a high percentile instead of the maximum). */
+  clipMax: number;
 }
 
-type RGB = [number, number, number];
+let rankCache: { counts: Uint32Array; t: Float32Array } | null = null;
 
-// plasma, 10 stops
-const STOPS: RGB[] = [
-  '#0d0887', '#46039f', '#7201a8', '#9c179e', '#bd3786',
-  '#d8576b', '#ed7953', '#fb9f3a', '#fdca26', '#f0f921',
-].map((h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)] as RGB);
+/** Equalised value in [0, 1] per PIN; ties get their mid-rank so the PIN index never decides a colour. */
+function rankTransform(counts: Uint32Array): Float32Array {
+  if (rankCache && rankCache.counts === counts) return rankCache.t;
+  const n = counts.length;
+  const order = Uint32Array.from({ length: n }, (_, i) => i).sort((a, b) => counts[a] - counts[b]);
+  const t = new Float32Array(n);
+  let i = 0;
+  while (i < n) {
+    let j = i;
+    while (j + 1 < n && counts[order[j + 1]] === counts[order[i]]) j++;
+    const mid = n > 1 ? (i + j) / 2 / (n - 1) : 0;
+    for (let k = i; k <= j; k++) t[order[k]] = mid;
+    i = j + 1;
+  }
+  rankCache = { counts, t };
+  return t;
+}
 
-export function palette(t: number): RGB {
-  const x = Math.min(1, Math.max(0, t)) * (STOPS.length - 1);
-  const i = Math.min(STOPS.length - 2, Math.floor(x));
-  const f = x - i;
-  const a = STOPS[i];
-  const b = STOPS[i + 1];
-  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+/** Maps a PIN to a value in [0, 1]. */
+export function makeNormalizer(counts: Uint32Array, p: ScaleParams): (pin: number) => number {
+  const clip = Math.max(1, p.clipMax);
+  switch (p.kind) {
+    case 'linear':
+      return (pin) => Math.min(1, counts[pin] / clip);
+    case 'gamma':
+      return (pin) => Math.min(1, counts[pin] / clip) ** p.gamma;
+    case 'log': {
+      let max = 0;
+      for (let i = 0; i < counts.length; i++) if (counts[i] > max) max = counts[i];
+      const denom = Math.log1p(max) || 1;
+      return (pin) => Math.log1p(counts[pin]) / denom;
+    }
+    case 'rank': {
+      const t = rankTransform(counts);
+      return (pin) => t[pin];
+    }
+  }
 }

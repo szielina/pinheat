@@ -1,8 +1,15 @@
 import { shareWhere } from './core/dataset';
 import { projectionsFor } from './core/projection';
 import { classify, tagsFor } from './core/classifier';
-import { normalizer, palette, type ScaleKind } from './core/scale';
-import { buildCoverage, coverageAt } from './core/coverage';
+import { makeNormalizer, type ScaleKind } from './core/scale';
+import { COLORMAPS, COLORMAP_IDS, lut, type ColormapId } from './core/colormap';
+import {
+  buildCoverage,
+  selectByPopularity,
+  valueAtPercentile,
+  type PopularityDirection,
+  type PopularitySelection,
+} from './core/coverage';
 import { fit, panBy, toCell, toScreen, zoomAt, type Frame, type Viewport } from './core/viewport';
 import { loadDataset } from './app/load';
 import { readState, writeState, type ViewState } from './app/state';
@@ -11,6 +18,7 @@ const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) 
 const fmtInt = (x: number) => x.toLocaleString('en-US');
 const fmtPct = (x: number) => (x * 100).toFixed(x < 0.001 ? 4 : 2) + '%';
 const HOVER_HINT = 'Hover over the map.';
+const DIM_ALPHA = 40;
 
 async function main() {
   const N = 4;
@@ -20,6 +28,7 @@ async function main() {
   const tags = tagsFor(N);
   const mask = classify(N);
   const cov = buildCoverage(ds);
+  const nPins = ds.counts.length;
   const pad = (pin: number) => String(pin).padStart(N, '0');
 
   let maxCount = 0;
@@ -27,20 +36,28 @@ async function main() {
 
   const canvas = $<HTMLCanvasElement>('map');
   const ctx = canvas.getContext('2d')!;
+  const legendCanvas = $<HTMLCanvasElement>('legend');
+  const legendCtx = legendCanvas.getContext('2d')!;
   const hoverEl = $<HTMLDivElement>('hover');
   const selEl = $<HTMLDivElement>('sel');
   const projEl = $<HTMLSelectElement>('proj');
+  const cmapEl = $<HTMLSelectElement>('cmap');
   const gammaEl = $<HTMLInputElement>('gamma');
+  const gammaOut = $<HTMLSpanElement>('gammaOut');
+  const clipEl = $<HTMLInputElement>('clip');
+  const clipOut = $<HTMLSpanElement>('clipOut');
   const tagsEl = $<HTMLDivElement>('tags');
-  const triesEl = $<HTMLInputElement>('tries');
-  const triesOut = $<HTMLDivElement>('triesOut');
+  const popN = $<HTMLInputElement>('popN');
+  const popRange = $<HTMLInputElement>('popRange');
+  const popOut = $<HTMLDivElement>('popOut');
   const resetEl = $<HTMLButtonElement>('reset');
 
-  const defaults: ViewState = { p: projIds[0], s: 'log', g: 0.5, t: 0 };
+  const defaults: ViewState = { p: projIds[0], s: 'log', g: 0.5, t: 0, m: 'viridis', c: 99, n: 0, d: 'top' };
   const state = readState(location.hash, defaults, projIds);
   const proj = () => projections[state.p];
 
   let selection = new Set<number>();
+  let pop: PopularitySelection | null = null; // PINs highlighted by popularity (null = off)
   let drag: { x0: number; y0: number; x1: number; y1: number } | null = null; // selection rectangle (cells)
   let panning: [number, number] | null = null; // last pointer position while panning
   let hover: [number, number] | null = null; // hovered cell
@@ -59,9 +76,13 @@ async function main() {
   // --- controls ---
   for (const id of projIds) projEl.add(new Option(projections[id].name, id));
   projEl.value = state.p;
+  for (const id of COLORMAP_IDS) cmapEl.add(new Option(COLORMAPS[id].label, id));
+  cmapEl.value = state.m;
   document.querySelectorAll<HTMLInputElement>('input[name=s]').forEach((r) => (r.checked = r.value === state.s));
   gammaEl.value = String(state.g);
-  triesEl.max = String(ds.counts.length);
+  clipEl.value = String(state.c);
+  popN.max = String(nPins);
+  popRange.max = String(nPins);
 
   const tagShare = tags.map((_, i) => shareWhere(ds, (p) => (mask[p] & (1 << i)) !== 0));
   const restShare = shareWhere(ds, (p) => mask[p] === 0);
@@ -76,31 +97,87 @@ async function main() {
   rest.textContent = `Remainder (no tag): ${fmtPct(restShare)} · tag shares may overlap`;
   tagsEl.appendChild(rest);
 
+  /** Enables only the sliders relevant to the chosen scale. */
+  function syncControls() {
+    gammaEl.disabled = state.s !== 'gamma';
+    clipEl.disabled = state.s !== 'linear' && state.s !== 'gamma';
+    gammaOut.textContent = state.g.toFixed(2);
+    clipOut.textContent = `${state.c}%`;
+  }
+
+  const clipMax = () => Math.max(1, valueAtPercentile(ds, cov, state.c));
+
+  // --- popularity filter ---
+  function recomputePopularity() {
+    state.n = Math.min(nPins, Math.max(0, Math.round(state.n)));
+    pop = state.n > 0 ? selectByPopularity(ds, cov, state.n, state.d) : null;
+  }
+
+  /** Mirrors the state into the radios, the number field and the slider. */
+  function syncPopularityControls(skipNumberField: boolean) {
+    if (!skipNumberField) popN.value = String(state.n);
+    popRange.value = String(state.n);
+    document.querySelectorAll<HTMLInputElement>('input[name=d]').forEach((r) => (r.checked = r.value === state.d));
+  }
+
+  function showPopularity() {
+    if (!pop) {
+      popOut.textContent = 'Pick a number of PINs to highlight them on the map.';
+      return;
+    }
+    const label = state.d === 'top' ? 'Most common' : 'Least common';
+    const tied = pop.size > state.n ? ` (+${fmtInt(pop.size - state.n)} tied)` : '';
+    popOut.textContent = `${label}: ${fmtInt(pop.size)} PINs${tied} · ${fmtPct(pop.size / nPins)} of space · ${fmtPct(pop.share)} of occurrences`;
+  }
+
   // --- rendering ---
-  /** Recolours the grid image: after a change of data view (projection, scale, tags, selection). */
+  /** Recolours the grid image: after a change of colours, scale, filters or selection. */
   function buildImage() {
     const p = proj();
     off.width = p.width;
     off.height = p.height;
     const img = offCtx.createImageData(p.width, p.height);
-    const norm = normalizer(state.s, maxCount, state.g);
-    for (let pin = 0; pin < ds.counts.length; pin++) {
+    const norm = makeNormalizer(ds.counts, { kind: state.s, gamma: state.g, clipMax: clipMax() });
+    const colors = lut(state.m);
+    const hasSelection = selection.size > 0;
+    const popMember = pop ? pop.member : null;
+    for (let pin = 0; pin < nPins; pin++) {
       const [x, y] = p.toXY(pin);
-      let [r, g, b] = palette(norm(ds.counts[pin]));
-      let a = 255;
-      if (state.t !== 0 && (mask[pin] & state.t) === 0) a = 30;
-      if (selection.has(pin)) {
-        r = r * 0.4;
-        g = g * 0.4 + 255 * 0.6;
-        b = b * 0.4 + 255 * 0.6;
-      }
+      const i = Math.min(255, Math.max(0, Math.round(norm(pin) * 255))) * 3;
+      const visible =
+          (state.t === 0 || (mask[pin] & state.t) !== 0) &&
+          (popMember === null || popMember[pin] === 1) &&
+          (!hasSelection || selection.has(pin));
       const o = (y * p.width + x) * 4;
-      img.data[o] = r;
-      img.data[o + 1] = g;
-      img.data[o + 2] = b;
-      img.data[o + 3] = a;
+      img.data[o] = colors[i];
+      img.data[o + 1] = colors[i + 1];
+      img.data[o + 2] = colors[i + 2];
+      img.data[o + 3] = visible ? 255 : DIM_ALPHA;
     }
     offCtx.putImageData(img, 0, 0);
+  }
+
+  const SCALE_LABEL: Record<ScaleKind, string> = {
+    linear: 'linear',
+    gamma: 'gamma',
+    log: 'logarithmic',
+    rank: 'rank-equalised',
+  };
+
+  /** Colour bar with the value range of the current scale. */
+  function updateLegend() {
+    const colors = lut(state.m);
+    const w = legendCanvas.width;
+    const h = legendCanvas.height;
+    for (let x = 0; x < w; x++) {
+      const i = Math.round((x / (w - 1)) * 255) * 3;
+      legendCtx.fillStyle = `rgb(${colors[i]},${colors[i + 1]},${colors[i + 2]})`;
+      legendCtx.fillRect(x, 0, 1, h);
+    }
+    const clipped = state.s === 'linear' || state.s === 'gamma';
+    $('legendLo').textContent = state.s === 'rank' ? 'least common' : '0';
+    $('legendMid').textContent = state.s === 'gamma' ? `gamma ${state.g.toFixed(2)}` : SCALE_LABEL[state.s];
+    $('legendHi').textContent = state.s === 'rank' ? 'most common' : clipped ? `≥ ${fmtInt(clipMax())}` : fmtInt(maxCount);
   }
 
   /** Paints the grid image through the viewport, plus the hover outline and the selection rectangle. */
@@ -125,9 +202,9 @@ async function main() {
       const [rx, ry] = toScreen(vp, x0, y0);
       const w = (Math.abs(drag.x1 - drag.x0) + 1) * vp.k;
       const h = (Math.abs(drag.y1 - drag.y0) + 1) * vp.k;
-      ctx.fillStyle = 'rgba(0,255,255,0.15)';
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
       ctx.fillRect(rx, ry, w, h);
-      ctx.strokeStyle = '#0ff';
+      ctx.strokeStyle = '#fff';
       ctx.lineWidth = 1;
       ctx.strokeRect(rx + 0.5, ry + 0.5, w - 1, h - 1);
     }
@@ -147,7 +224,16 @@ async function main() {
   function commit() {
     writeState(state);
     buildImage();
+    updateLegend();
     draw();
+  }
+
+  /** Applies state.n and state.d: recomputes the set, syncs the controls, repaints. */
+  function applyPopularity(fromNumberField = false) {
+    recomputePopularity();
+    syncPopularityControls(fromNumberField && Number(popN.value) === state.n);
+    showPopularity();
+    commit();
   }
 
   // --- readouts ---
@@ -168,11 +254,6 @@ async function main() {
         .map((p) => `${pad(p)} (${fmtInt(ds.counts[p])})`)
         .join(', ');
     selEl.textContent = `${fmtInt(selection.size)} PINs · ${fmtPct(shareWhere(ds, (p) => selection.has(p)))} of occurrences · top 5: ${top}`;
-  }
-
-  function showTries() {
-    const k = Number(triesEl.value);
-    triesOut.textContent = `${fmtInt(k)} attempts → ${fmtPct(coverageAt(cov, k))} of occurrences`;
   }
 
   // --- pointer geometry ---
@@ -207,14 +288,25 @@ async function main() {
     buildImage();
     layout();
   });
+  cmapEl.addEventListener('change', () => {
+    state.m = cmapEl.value as ColormapId;
+    commit();
+  });
   document.querySelectorAll<HTMLInputElement>('input[name=s]').forEach((r) =>
       r.addEventListener('change', () => {
         state.s = r.value as ScaleKind;
+        syncControls();
         commit();
       }),
   );
   gammaEl.addEventListener('input', () => {
     state.g = Number(gammaEl.value);
+    syncControls();
+    commit();
+  });
+  clipEl.addEventListener('input', () => {
+    state.c = Number(clipEl.value);
+    syncControls();
     commit();
   });
   tagsEl.addEventListener('change', (e) => {
@@ -223,7 +315,27 @@ async function main() {
     state.t ^= 1 << Number(input.dataset.bit);
     commit();
   });
-  triesEl.addEventListener('input', showTries);
+  document.querySelectorAll<HTMLInputElement>('input[name=d]').forEach((r) =>
+      r.addEventListener('change', () => {
+        state.d = r.value as PopularityDirection;
+        applyPopularity();
+      }),
+  );
+  popRange.addEventListener('input', () => {
+    state.n = Number(popRange.value);
+    applyPopularity();
+  });
+  popN.addEventListener('input', () => {
+    const v = Number(popN.value);
+    state.n = Number.isFinite(v) ? v : 0;
+    applyPopularity(true);
+  });
+  document.querySelectorAll<HTMLButtonElement>('button[data-n]').forEach((b) =>
+      b.addEventListener('click', () => {
+        state.n = Number(b.dataset.n);
+        applyPopularity();
+      }),
+  );
   $('clear').addEventListener('click', () => {
     selection = new Set();
     showSelection();
@@ -300,10 +412,14 @@ async function main() {
     draw();
   });
 
+  recomputePopularity();
+  syncPopularityControls(false);
+  showPopularity();
+  syncControls();
   buildImage();
+  updateLegend();
   layout();
   showSelection();
-  showTries();
   new ResizeObserver(layout).observe($('stage'));
 }
 

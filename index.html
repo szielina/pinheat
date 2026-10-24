@@ -11,12 +11,16 @@
     @media (max-width:800px) { main { grid-template-columns:1fr; } }
     h1 { font-size:18px; margin:0 0 4px; }
     .muted { color:var(--muted); }
-    #stage { position:relative; width:100%; aspect-ratio:1; margin:8px 0; }
-    canvas { width:100%; height:100%; display:block; background:#000; cursor:grab; touch-action:none; }
+    #stage { position:relative; width:100%; aspect-ratio:1; margin:8px 0 4px; }
+    #map { width:100%; height:100%; display:block; background:#000; cursor:grab; touch-action:none; }
+    #legend { width:100%; height:12px; display:block; border-radius:2px; }
+    .legend-labels { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:8px; }
     fieldset { border:1px solid var(--line); border-radius:6px; margin:0 0 12px; padding:8px 12px; }
     legend { color:var(--muted); padding:0 4px; }
     label { display:block; }
     select, button { font:inherit; }
+    .chips { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0; }
+    .chips button { padding:2px 10px; }
     footer { grid-column:1 / -1; color:var(--muted); font-size:12px; border-top:1px solid var(--line); padding-top:12px; }
   </style>
 </head>
@@ -26,6 +30,8 @@
     <h1>pinheat</h1>
     <div id="src" class="muted"></div>
     <div id="stage"><canvas id="map"></canvas></div>
+    <canvas id="legend" width="256" height="12"></canvas>
+    <div class="legend-labels"><span id="legendLo"></span><span id="legendMid"></span><span id="legendHi"></span></div>
     <div id="hover" class="muted">Hover over the map.</div>
   </section>
   <aside>
@@ -34,16 +40,30 @@
       <button id="reset">Reset view</button>
     </fieldset>
     <fieldset><legend>Projection</legend><select id="proj"></select></fieldset>
+    <fieldset><legend>Colour</legend><select id="cmap"></select></fieldset>
     <fieldset><legend>Scale</legend>
       <label><input type="radio" name="s" value="linear"> linear</label>
-      <label><input type="radio" name="s" value="log"> logarithmic</label>
       <label><input type="radio" name="s" value="gamma"> gamma</label>
-      <label>gamma <input type="range" id="gamma" min="0.1" max="1.5" step="0.05"></label>
+      <label><input type="radio" name="s" value="log"> logarithmic</label>
+      <label><input type="radio" name="s" value="rank"> rank (equalised)</label>
+      <label>gamma <span id="gammaOut" class="muted"></span>
+        <input type="range" id="gamma" min="0.1" max="1.5" step="0.05" style="width:100%"></label>
+      <label>clip at percentile <span id="clipOut" class="muted"></span>
+        <input type="range" id="clip" min="50" max="100" step="0.5" style="width:100%"></label>
     </fieldset>
     <fieldset><legend>Tags (the rest is dimmed)</legend><div id="tags"></div></fieldset>
-    <fieldset><legend>Number of attempts</legend>
-      <input type="range" id="tries" min="0" value="100" style="width:100%">
-      <div id="triesOut"></div>
+    <fieldset><legend>By popularity</legend>
+      <label><input type="radio" name="d" value="top"> Most common</label>
+      <label><input type="radio" name="d" value="bottom"> Least common</label>
+      <label>PINs <input type="number" id="popN" min="0" step="1" style="width:6em"></label>
+      <input type="range" id="popRange" min="0" step="1" style="width:100%">
+      <div class="chips">
+        <button data-n="10">10</button>
+        <button data-n="100">100</button>
+        <button data-n="1000">1,000</button>
+        <button data-n="0">Off</button>
+      </div>
+      <div id="popOut"></div>
     </fieldset>
     <fieldset><legend>Selection</legend>
       <div id="sel"></div>
