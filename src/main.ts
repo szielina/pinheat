@@ -12,6 +12,7 @@ import {
 } from './core/coverage';
 import { fit, panBy, toCell, toScreen, zoomAt, type Frame, type Viewport } from './core/viewport';
 import { drawAxes, plotRect, type PlotRect } from './app/axes';
+import { installHints } from './app/hints';
 import { loadDataset } from './app/load';
 import { readState, writeState, type ViewState } from './app/state';
 
@@ -20,7 +21,10 @@ const fmtInt = (x: number) => x.toLocaleString('en-US');
 const fmtPct = (x: number) => (x * 100).toFixed(x < 0.001 ? 4 : 2) + '%';
 const HOVER_HINT = 'Hover over the map.';
 const DIM_ALPHA = 40;
-const CLICK_SLOP = 5; // pointer travel (CSS px) below which a press counts as a click, not a pan
+const CLICK_SLOP = 5; // pointer travel (CSS px) below which a mouse press counts as a click, not a pan
+const TOUCH_CLICK_SLOP = 10; // fingers are less steady than a mouse
+const DOUBLE_CLICK_MS = 350; // two clicks / taps this close in time and space zoom in
+const DOUBLE_CLICK_PX = 10;
 
 async function main() {
   const N = 4;
@@ -43,6 +47,7 @@ async function main() {
   const hoverEl = $<HTMLDivElement>('hover');
   const tipEl = $<HTMLDivElement>('tip');
   const selEl = $<HTMLDivElement>('sel');
+  const pickEl = $<HTMLDivElement>('pick');
   const projEl = $<HTMLSelectElement>('proj');
   const cmapEl = $<HTMLSelectElement>('cmap');
   const gammaEl = $<HTMLInputElement>('gamma');
@@ -64,10 +69,17 @@ async function main() {
   let drag: { x0: number; y0: number; x1: number; y1: number } | null = null; // selection rectangle (cells)
   let panning: [number, number] | null = null; // last pointer position while panning
   // a pressed pointer: where it went down, the cell under it, and whether it has travelled far enough to be a pan
-  let down: { px: number; py: number; cell: [number, number] | null; moved: boolean } | null = null;
+  let down: { px: number; py: number; cell: [number, number] | null; moved: boolean; slop: number } | null = null;
+  const pointers = new Map<number, [number, number]>(); // pressed pointers (map-area coordinates), in press order
+  let pinch: { dist: number; cx: number; cy: number } | null = null; // two-finger gesture in progress
+  let lastClick: { t: number; px: number; py: number } | null = null; // for double-click / double-tap zoom
+  let picked: number | null = null; // PIN selected by clicking; it has its own section and does not dim the map
   let hover: [number, number] | null = null; // hovered cell
   let frame: Frame = { gridW: 1, gridH: 1, viewW: 1, viewH: 1 };
   let vp: Viewport = { x: 0, y: 0, k: 1 };
+  /** True while the map itself is being moved (pan or pinch): guide lines and the tooltip stay out of the way. */
+  const moving = () => (down !== null && down.moved) || pinch !== null;
+  let dpr = window.devicePixelRatio || 1; // pixel ratio the canvas backing store was sized for (see layout)
   let plot: PlotRect = plotRect(1, 1, N); // map area inside the canvas; the rest is reserved for the axes
 
   // colour image of the grid, one pixel per cell; the visible canvas draws it through the viewport
@@ -188,7 +200,10 @@ async function main() {
 
   /** Paints the grid image through the viewport, plus the hover outline and the selection rectangle. */
   function draw() {
-    const dpr = window.devicePixelRatio || 1;
+    if ((window.devicePixelRatio || 1) !== dpr) {
+      layout(false); // page zoom changed the pixel ratio: resize the backing store first (layout redraws)
+      return;
+    }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, plot.outerW, plot.outerH);
@@ -203,7 +218,7 @@ async function main() {
     const [sx, sy] = toScreen(vp, 0, 0);
     ctx.drawImage(off, sx, sy, frame.gridW * vp.k, frame.gridH * vp.k);
 
-    if (hover) {
+    if (hover && !moving()) {
       // thin guide lines through the hovered cell, pointing at both axes
       const [gx, gy] = toScreen(vp, hover[0] + 0.5, hover[1] + 0.5);
       const lx = Math.round(gx) + 0.5;
@@ -217,11 +232,23 @@ async function main() {
       ctx.lineTo(frame.viewW, ly);
       ctx.stroke();
     }
-    if (hover && vp.k >= 4) {
+    if (hover && !moving() && vp.k >= 4) {
       const [hx, hy] = toScreen(vp, hover[0], hover[1]);
       ctx.strokeStyle = '#fff';
       ctx.lineWidth = 1;
       ctx.strokeRect(hx + 0.5, hy + 0.5, vp.k - 1, vp.k - 1);
+    }
+    if (picked !== null) {
+      // square around the clicked PIN: dark outline under a light one, readable on every palette
+      const [pcx, pcy] = proj().toXY(picked);
+      const [mx, my] = toScreen(vp, pcx + 0.5, pcy + 0.5);
+      const s = Math.max(vp.k + 2, 9);
+      ctx.lineWidth = 3.5;
+      ctx.strokeStyle = '#000';
+      ctx.strokeRect(mx - s / 2, my - s / 2, s, s);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#fff';
+      ctx.strokeRect(mx - s / 2, my - s / 2, s, s);
     }
     if (drag) {
       const x0 = Math.min(drag.x0, drag.x1);
@@ -237,18 +264,18 @@ async function main() {
     }
     ctx.restore();
 
-    drawAxes(ctx, plot, vp, proj(), hover);
+    drawAxes(ctx, plot, vp, proj(), moving() ? null : hover);
   }
 
-  /** Sizes the canvas to its container and fits the whole grid into view. */
-  function layout() {
+  /** Sizes the canvas to its container. Refits the whole grid, or (on a mere resize) keeps the current view. */
+  function layout(refit = true) {
     const r = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
+    dpr = window.devicePixelRatio || 1;
     canvas.width = Math.round(r.width * dpr);
     canvas.height = Math.round(r.height * dpr);
     plot = plotRect(r.width, r.height, N);
     frame = { gridW: proj().width, gridH: proj().height, viewW: plot.width, viewH: plot.height };
-    vp = fit(frame);
+    vp = refit ? fit(frame) : panBy(vp, frame, 0, 0); // panBy re-clamps the view to the new frame
     draw();
   }
 
@@ -280,7 +307,7 @@ async function main() {
 
   function showSelection() {
     if (selection.size === 0) {
-      selEl.textContent = 'Click a PIN or Shift+drag a rectangle on the map.';
+      selEl.textContent = 'Shift+drag a rectangle on the map.';
       return;
     }
     if (selection.size === 1) {
@@ -295,11 +322,33 @@ async function main() {
     selEl.textContent = `${fmtInt(selection.size)} PINs · ${fmtPct(shareWhere(ds, (p) => selection.has(p)))} of occurrences · top 5: ${top}`;
   }
 
-  /** Adds the PIN to the selection, or removes it when it is already there. */
-  function toggleSelected(pin: number) {
-    if (!selection.delete(pin)) selection.add(pin);
-    showSelection();
-    buildImage();
+  /** Statistics of the clicked PIN, always visible in their own section. */
+  function showPicked() {
+    pickEl.textContent = '';
+    const line = (text: string, big = false) => {
+      const d = document.createElement('div');
+      d.textContent = text;
+      if (big) d.style.cssText = 'font-size:16px;font-weight:600';
+      pickEl.appendChild(d);
+    };
+    if (picked === null) {
+      line('Click a PIN on the map.');
+      pickEl.firstElementChild!.className = 'muted';
+      return;
+    }
+    const c = ds.counts[picked];
+    const rank = cov.rank[picked] + 1;
+    const matched = tags.filter((_, i) => (mask[picked as number] & (1 << i)) !== 0).map((t) => t.label);
+    line(`PIN ${pad(picked)}`, true);
+    line(`${fmtInt(c)} occurrences · ${fmtPct(c / ds.total)} of all`);
+    line(`rank #${fmtInt(rank)} of ${fmtInt(nPins)} · top ${fmtPct(rank / nPins)} of PINs`);
+    line(matched.length > 0 ? `tags: ${matched.join(', ')}` : 'tags: none');
+  }
+
+  /** Clicking a PIN selects it; clicking it again (or another PIN) deselects / replaces it. */
+  function selectPin(pin: number) {
+    picked = picked === pin ? null : pin;
+    showPicked();
   }
 
   // --- pointer geometry ---
@@ -324,7 +373,7 @@ async function main() {
   };
   /** Small label next to the cursor: PIN and rank. Hidden while panning or dragging a rectangle. */
   function showTip(cell: [number, number] | null, px: number, py: number) {
-    if (!cell || drag !== null || (down !== null && down.moved)) {
+    if (!cell || drag !== null || moving()) {
       tipEl.style.display = 'none';
       return;
     }
@@ -413,24 +462,58 @@ async function main() {
     draw();
   });
 
-  // --- events: map (click = select a PIN, drag = pan, Shift+drag = select a rectangle, wheel / double-click = zoom) ---
+  // --- events: map ---
+  // mouse: click = select a PIN, drag = pan, Shift+drag = rectangle, wheel / double-click = zoom
+  // touch: tap = select a PIN, drag = pan, two fingers = pinch zoom + pan, double-tap = zoom
+  const isTouch = (e: PointerEvent) => e.pointerType === 'touch';
+
+  /** Distance and centre of the first two pressed pointers. */
+  function pinchGeometry() {
+    const [a, b] = [...pointers.values()];
+    return { dist: Math.hypot(b[0] - a[0], b[1] - a[1]), cx: (a[0] + b[0]) / 2, cy: (a[1] + b[1]) / 2 };
+  }
+
+  function hideHover() {
+    hover = null;
+    hoverEl.textContent = HOVER_HINT;
+    tipEl.style.display = 'none';
+  }
+
   canvas.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     canvas.setPointerCapture(e.pointerId);
     const [px, py] = local(e);
-    if (e.shiftKey) {
+    pointers.set(e.pointerId, [px, py]);
+    if (pointers.size >= 2) {
+      // a second finger turns the gesture into a pinch: forget the click, pan or rectangle in progress
+      down = null;
+      panning = null;
+      drag = null;
+      hideHover();
+      pinch = pinchGeometry();
+    } else if (e.shiftKey && !isTouch(e)) {
       const [x, y] = clampedCellAt(px, py);
       drag = { x0: x, y0: y, x1: x, y1: y };
     } else {
-      // click or pan is decided once the pointer has travelled CLICK_SLOP pixels
-      down = { px, py, cell: cellAt(px, py), moved: false };
+      // click or pan is decided once the pointer has travelled `slop` pixels
+      down = { px, py, cell: cellAt(px, py), moved: false, slop: isTouch(e) ? TOUCH_CLICK_SLOP : CLICK_SLOP };
       panning = [px, py];
     }
     draw();
   });
   canvas.addEventListener('pointermove', (e) => {
     const [px, py] = local(e);
-    if (down && !down.moved && Math.hypot(px - down.px, py - down.py) >= CLICK_SLOP) {
+    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, [px, py]);
+
+    if (pinch && pointers.size >= 2) {
+      const g = pinchGeometry();
+      vp = panBy(vp, frame, g.cx - pinch.cx, g.cy - pinch.cy);
+      if (pinch.dist > 0 && g.dist > 0) vp = zoomAt(vp, frame, g.cx, g.cy, g.dist / pinch.dist);
+      pinch = g;
+      draw();
+      return;
+    }
+    if (down && !down.moved && Math.hypot(px - down.px, py - down.py) >= down.slop) {
       down.moved = true;
       canvas.style.cursor = 'grabbing'; // the hand only appears while the map is really being dragged
     }
@@ -439,10 +522,47 @@ async function main() {
       panning = [px, py];
     }
     if (drag) [drag.x1, drag.y1] = clampedCellAt(px, py);
-    updateHover(px, py);
+    if (isTouch(e)) hideHover(); // a finger covers the cell anyway; guide lines under it would only get in the way
+    else updateHover(px, py);
     draw();
   });
-  function endGesture(cancelled: boolean) {
+
+  /** A press that did not travel: the second one in quick succession zooms in, otherwise it selects the PIN under it. */
+  function onClick(cell: [number, number] | null, px: number, py: number, touch: boolean) {
+    const now = performance.now();
+    if (
+        lastClick !== null &&
+        now - lastClick.t < DOUBLE_CLICK_MS &&
+        Math.hypot(px - lastClick.px, py - lastClick.py) < DOUBLE_CLICK_PX
+    ) {
+      lastClick = null;
+      vp = zoomAt(vp, frame, px, py, 2); // the first click of the pair has already selected the PIN
+      if (!touch) updateHover(px, py);
+      return;
+    }
+    lastClick = { t: now, px, py };
+    if (cell) selectPin(proj().toPin(cell[0], cell[1]));
+  }
+
+  function endPointer(e: PointerEvent, cancelled: boolean) {
+    if (!pointers.delete(e.pointerId)) return; // not a press we tracked (e.g. right button, or already finished)
+    const [px, py] = local(e);
+
+    if (pinch) {
+      if (pointers.size >= 2) {
+        pinch = pinchGeometry(); // a third finger left: carry on with the first two
+        return;
+      }
+      pinch = null;
+      const rest = [...pointers.values()][0];
+      // the finger that stays keeps panning, and its release is never a click
+      down = rest ? { px: rest[0], py: rest[1], cell: null, moved: true, slop: 0 } : null;
+      panning = rest ? [rest[0], rest[1]] : null;
+      canvas.style.cursor = '';
+      draw();
+      return;
+    }
+
     if (drag) {
       const p = proj();
       selection = new Set();
@@ -453,19 +573,18 @@ async function main() {
       showSelection();
       buildImage();
     }
-    const clicked = !cancelled && down !== null && !down.moved ? down.cell : null;
+    const pressed = down;
     down = null;
     panning = null;
     canvas.style.cursor = '';
-    if (clicked) toggleSelected(proj().toPin(clicked[0], clicked[1]));
+    if (!cancelled && pressed && !pressed.moved) onClick(pressed.cell, px, py, isTouch(e));
     draw();
   }
-  canvas.addEventListener('pointerup', () => endGesture(false));
-  canvas.addEventListener('pointercancel', () => endGesture(true));
+  canvas.addEventListener('pointerup', (e) => endPointer(e, false));
+  canvas.addEventListener('pointercancel', (e) => endPointer(e, true));
+  canvas.addEventListener('lostpointercapture', (e) => endPointer(e, true)); // no-op after a normal release
   canvas.addEventListener('pointerleave', () => {
-    hover = null;
-    hoverEl.textContent = HOVER_HINT;
-    tipEl.style.display = 'none';
+    hideHover();
     draw();
   });
   canvas.addEventListener(
@@ -480,13 +599,6 @@ async function main() {
       },
       { passive: false },
   );
-  canvas.addEventListener('dblclick', (e) => {
-    const [px, py] = local(e);
-    vp = zoomAt(vp, frame, px, py, 2);
-    updateHover(px, py);
-    draw();
-  });
-
   recomputePopularity();
   syncPopularityControls(false);
   showPopularity();
@@ -495,7 +607,10 @@ async function main() {
   updateLegend();
   layout();
   showSelection();
-  new ResizeObserver(layout).observe($('stage'));
+  showPicked();
+  new ResizeObserver(() => layout(false)).observe($('stage'));
+  window.addEventListener('resize', () => layout(false)); // page zoom changes the pixel ratio without resizing the stage
 }
 
+installHints();
 main().catch(console.error);

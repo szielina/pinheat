@@ -11,16 +11,26 @@
     @media (max-width:800px) { main { grid-template-columns:1fr; } }
     h1 { font-size:18px; margin:0 0 4px; }
     .muted { color:var(--muted); }
-    .hint { color:var(--muted); font-size:12px; line-height:1.4; }
-    div.hint { margin:2px 0 8px; }
-    label .hint { margin-left:4px; }
     #stage { position:relative; width:100%; aspect-ratio:1; margin:8px 0 4px; }
-    #map { width:100%; height:100%; display:block; background:#000; cursor:crosshair; touch-action:none; }
+    #map { width:100%; height:100%; display:block; background:#000; cursor:crosshair; touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
     #tip { position:absolute; left:0; top:0; display:none; pointer-events:none; z-index:2; padding:0 6px; font:11px/18px system-ui, sans-serif; white-space:nowrap; color:var(--fg); background:rgba(15,17,21,.85); border:1px solid var(--line); border-radius:3px; }
+    #hint { position:fixed; left:0; top:0; display:none; width:max-content; pointer-events:none; z-index:10; padding:6px 8px; font:12px/1.4 system-ui, sans-serif; color:var(--fg); background:rgba(20,23,29,.97); border:1px solid #3a414d; border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,.5); }
     #legend { width:100%; height:12px; display:block; border-radius:2px; }
     .legend-labels { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:8px; }
-    fieldset { border:1px solid var(--line); border-radius:6px; margin:0 0 12px; padding:8px 12px; }
-    legend { color:var(--muted); padding:0 4px; }
+
+    /* settings panel: accordion sections (<details>) and always-open ones (<section>) share one look */
+    .panel { border:1px solid var(--line); border-radius:6px; margin:0 0 12px; }
+    .panel > summary, .panel > .head { padding:6px 12px; color:var(--muted); }
+    .panel > summary { cursor:pointer; list-style:none; display:flex; align-items:center; gap:6px; user-select:none; }
+    .panel > summary::-webkit-details-marker { display:none; }
+    .panel > summary::before { content:'▸'; font-size:11px; transition:transform .12s; }
+    .panel[open] > summary::before { transform:rotate(90deg); }
+    .panel > summary:hover { color:var(--fg); }
+    .panel > .body { padding:0 12px 10px; }
+    .row { display:flex; gap:12px; margin:0 0 12px; }
+    .row .panel { margin:0; }
+    .row .grow { flex:1; min-width:0; }
+    .row select { width:100%; }
     label { display:block; }
     select, button { font:inherit; }
     .chips { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0; }
@@ -39,57 +49,76 @@
     <div id="hover" class="muted">Hover over the map.</div>
   </section>
   <aside>
-    <fieldset><legend>View</legend>
-      <div class="hint">Wheel or double-click: zoom · drag: pan · click: select a PIN · Shift+drag: select a rectangle.</div>
-      <button id="reset">Reset view</button>
-    </fieldset>
-    <fieldset><legend>Projection</legend>
-      <select id="proj"></select>
-      <div class="hint">Which digit pairs form the axes (y × x). In AB × CD the rows are the first two digits and the columns the last two. Same PINs, different arrangement; the axis labels show the pattern (47nn = first digits 4 and 7).</div>
-    </fieldset>
-    <fieldset><legend>Colour</legend>
-      <select id="cmap"></select>
-      <div class="hint">Palette of the colour scale shown under the map. Viridis and cividis stay readable for colour-blind people.</div>
-    </fieldset>
-    <fieldset><legend>Scale</legend>
-      <div class="hint">How the number of occurrences of a PIN becomes a colour.</div>
-      <label><input type="radio" name="s" value="linear"> linear <span class="hint">count ÷ clip level; a few giants dominate</span></label>
-      <label><input type="radio" name="s" value="gamma"> gamma <span class="hint">linear raised to a power; below 1 lifts rare PINs</span></label>
-      <label><input type="radio" name="s" value="log"> logarithmic <span class="hint">log of the count; shows the whole range</span></label>
-      <label><input type="radio" name="s" value="rank"> rank (equalised) <span class="hint">colour = place in the ranking; every shade is equally common</span></label>
-      <label>gamma <span id="gammaOut" class="muted"></span>
-        <input type="range" id="gamma" min="0.1" max="1.5" step="0.05" style="width:100%"></label>
-      <div class="hint">Exponent of the gamma scale. Below 1 brightens rare PINs, above 1 darkens them.</div>
-      <label>clip at percentile <span id="clipOut" class="muted"></span>
-        <input type="range" id="clip" min="50" max="100" step="0.5" style="width:100%"></label>
-      <div class="hint">Linear and gamma only. PINs above this percentile of the count distribution all get the brightest colour, so a few giants such as 1234 do not wash out the rest. 99% = the top 1% of PINs saturate; 100% = no clipping.</div>
-    </fieldset>
-    <fieldset><legend>Tags (the rest is dimmed)</legend>
-      <div class="hint">Show only PINs that match any ticked tag. The percentages are shares of all occurrences; tags can overlap.</div>
-      <div id="tags"></div>
-    </fieldset>
-    <fieldset><legend>By popularity</legend>
-      <div class="hint">Highlights the N most (or least) common PINs; the rest is dimmed. The line below says how much of all occurrences they cover.</div>
-      <label><input type="radio" name="d" value="top"> Most common</label>
-      <label><input type="radio" name="d" value="bottom"> Least common</label>
-      <label>PINs <input type="number" id="popN" min="0" step="1" style="width:6em"></label>
-      <input type="range" id="popRange" min="0" step="1" style="width:100%">
-      <div class="chips">
-        <button data-n="10">10</button>
-        <button data-n="100">100</button>
-        <button data-n="1000">1,000</button>
-        <button data-n="0">Off</button>
+    <div class="row">
+      <section class="panel">
+        <div class="head" title="Mouse: wheel or double-click zooms, drag pans, click selects a PIN, Shift+drag selects a rectangle. Touch: drag pans, pinch or double-tap zooms, tap selects a PIN.">View</div>
+        <div class="body"><button id="reset" title="Fit the whole grid into the view.">Reset view</button></div>
+      </section>
+      <section class="panel grow">
+        <div class="head" title="Which digit pairs form the axes (y × x). In AB × CD the rows are the first two digits and the columns the last two. Same PINs, different arrangement; the axis labels show the pattern (47nn = first digits 4 and 7).">Projection</div>
+        <div class="body"><select id="proj"></select></div>
+      </section>
+    </div>
+
+    <section class="panel">
+      <div class="head" title="Statistics of the PIN you clicked on the map. Click it again to deselect, or click another PIN to switch. It does not dim the rest of the map.">Selected PIN</div>
+      <div class="body"><div id="pick"></div></div>
+    </section>
+
+    <details class="panel" open>
+      <summary title="How the number of occurrences of a PIN becomes a colour.">Scale</summary>
+      <div class="body">
+        <label title="Count divided by the clip level. Honest, but a few giants dominate."><input type="radio" name="s" value="linear"> linear</label>
+        <label title="Linear raised to a power. Below 1 it lifts rare PINs."><input type="radio" name="s" value="gamma"> gamma</label>
+        <label title="Logarithm of the count. Shows the whole range at once."><input type="radio" name="s" value="log"> logarithmic</label>
+        <label title="Colour = place in the ranking, so every shade covers the same number of PINs."><input type="radio" name="s" value="rank"> rank (equalised)</label>
+        <label title="Exponent of the gamma scale. Below 1 brightens rare PINs, above 1 darkens them.">gamma <span id="gammaOut" class="muted"></span>
+          <input type="range" id="gamma" min="0.1" max="1.5" step="0.05" style="width:100%"></label>
+        <label title="Linear and gamma only. PINs above this percentile of the count distribution all get the brightest colour, so a few giants such as 1234 do not wash out the rest. 99% = the top 1% of PINs saturate; 100% = no clipping.">clip at percentile <span id="clipOut" class="muted"></span>
+          <input type="range" id="clip" min="50" max="100" step="0.5" style="width:100%"></label>
       </div>
-      <div id="popOut"></div>
-    </fieldset>
-    <fieldset><legend>Selection</legend>
-      <div class="hint">Click a PIN to add or remove it; Shift+drag selects a rectangle (replacing the selection). Everything outside the selection is dimmed, and the selection survives a change of projection.</div>
-      <div id="sel"></div>
-      <button id="clear">Clear</button>
-    </fieldset>
+    </details>
+
+    <details class="panel">
+      <summary title="Palette of the colour scale shown under the map. Viridis and cividis stay readable for colour-blind people.">Colour</summary>
+      <div class="body"><select id="cmap"></select></div>
+    </details>
+
+    <details class="panel" open>
+      <summary title="Show only PINs that match any ticked tag; the rest is dimmed. The percentages are shares of all occurrences, and tags can overlap.">Tags (the rest is dimmed)</summary>
+      <div class="body"><div id="tags"></div></div>
+    </details>
+
+    <details class="panel" open>
+      <summary title="Highlights the N most (or least) common PINs; the rest is dimmed. The line below says how much of all occurrences they cover.">By popularity</summary>
+      <div class="body">
+        <label><input type="radio" name="d" value="top"> Most common</label>
+        <label><input type="radio" name="d" value="bottom"> Least common</label>
+        <label title="How many PINs to highlight.">PINs <input type="number" id="popN" min="0" step="1" style="width:6em"></label>
+        <input type="range" id="popRange" min="0" step="1" style="width:100%" title="How many PINs to highlight.">
+        <div class="chips">
+          <button data-n="10">10</button>
+          <button data-n="100">100</button>
+          <button data-n="1000">1,000</button>
+          <button data-n="0" title="Turn the highlight off.">Off</button>
+        </div>
+        <div id="popOut"></div>
+      </div>
+    </details>
+
+    <details class="panel" open>
+      <summary title="Shift+drag a rectangle on the map to select many PINs at once. Everything outside the selection is dimmed, and the selection survives a change of projection.">Selection</summary>
+      <div class="body">
+        <div id="sel"></div>
+        <button id="clear">Clear</button>
+      </div>
+    </details>
   </aside>
   <footer>These are passwords from data breaches (HIBP), not a representative sample of PINs in use. Counts are occurrences, not unique people. Everything is computed locally in your browser.</footer>
 </main>
 <script type="module" src="/src/main.ts"></script>
+<!-- Cloudflare Web Analytics -->
+<script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "b1ef5532a253439dbf96d559f5b168a9"}'></script>
+<!-- End Cloudflare Web Analytics -->
 </body>
 </html>
