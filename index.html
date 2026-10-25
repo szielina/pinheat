@@ -11,6 +11,7 @@
     @media (max-width:800px) { main { grid-template-columns:1fr; } }
     h1 { font-size:18px; margin:0 0 4px; }
     .muted { color:var(--muted); }
+    a { color:#8ab4f8; }
     #stage { position:relative; width:100%; aspect-ratio:1; margin:8px 0 4px; }
     #map { width:100%; height:100%; display:block; background:#000; cursor:crosshair; touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
     #tip { position:absolute; left:0; top:0; display:none; pointer-events:none; z-index:2; padding:0 6px; font:11px/18px system-ui, sans-serif; white-space:nowrap; color:var(--fg); background:rgba(15,17,21,.85); border:1px solid var(--line); border-radius:3px; }
@@ -50,6 +51,7 @@
   <section>
     <h1>pinheat</h1>
     <div id="src" class="muted"></div>
+    <div class="muted"><a href="https://github.com/szielina/pinheat#readme">What is this? README, data and credits</a></div>
     <div id="stage"><canvas id="map"></canvas><div id="tip"></div></div>
     <div id="legendCap" class="muted"></div>
     <div id="legendWrap" title="Colour scale. The ticks say what each colour means under the chosen scale. The white line marks the PIN under the cursor, the square marks the clicked PIN.">
@@ -114,7 +116,7 @@
           <button data-n="1000">1,000</button>
           <button data-n="0" title="Turn the highlight off.">Off</button>
         </div>
-        <div id="popOut"></div>
+        <div id="popOut" title="PINs that tie with the boundary count are all included, so the set can be slightly larger than the number you asked for."></div>
       </div>
     </details>
 
@@ -126,7 +128,7 @@
       </div>
     </details>
   </aside>
-  <footer>These are passwords from data breaches (HIBP), not a representative sample of PINs in use. Counts are occurrences, not unique people. Everything is computed locally in your browser.</footer>
+  <footer>These are passwords from data breaches (HIBP), not a representative sample of PINs in use. Counts are occurrences, not unique people. Everything is computed locally in your browser; the site only counts page views with Cloudflare Web Analytics (no cookies). Data: <a href="https://haveibeenpwned.com/">Have I Been Pwned</a> (CC BY 4.0). <a href="https://github.com/szielina/pinheat">Source code and README</a>.</footer>
 </main>
 <script type="module" src="/src/main.ts"></script>
 <!-- Cloudflare Web Analytics -->

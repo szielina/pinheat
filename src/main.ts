@@ -157,8 +157,7 @@ async function main() {
       return;
     }
     const label = state.d === 'top' ? 'Most common' : 'Least common';
-    const tied = pop.size > state.n ? ` (+${fmtInt(pop.size - state.n)} tied)` : '';
-    popOut.textContent = `${label}: ${fmtInt(pop.size)} PINs${tied} · ${fmtPct(pop.size / nPins)} of space · ${fmtPct(pop.share)} of occurrences`;
+    popOut.textContent = `${label}: ${fmtInt(pop.size)} PINs · ${fmtPct(pop.size / nPins)} of space · ${fmtPct(pop.share)} of occurrences`;
   }
 
   // --- rendering ---

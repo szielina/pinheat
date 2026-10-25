@@ -48,6 +48,7 @@ export function legendTicks(i: LegendInput): LegendTick[] {
   if (i.kind === 'rank') {
     return [
       { t: 0, label: 'rarest' },
+      { t: 0.2, label: 'bottom 20%' },
       { t: 0.5, label: 'median' },
       { t: 0.8, label: 'top 20%' },
       { t: 1, label: 'commonest' },
