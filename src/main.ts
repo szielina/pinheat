@@ -11,6 +11,7 @@ import {
   type PopularitySelection,
 } from './core/coverage';
 import { fit, panBy, toCell, toScreen, zoomAt, type Frame, type Viewport } from './core/viewport';
+import { drawAxes, plotRect, type PlotRect } from './app/axes';
 import { loadDataset } from './app/load';
 import { readState, writeState, type ViewState } from './app/state';
 
@@ -19,6 +20,7 @@ const fmtInt = (x: number) => x.toLocaleString('en-US');
 const fmtPct = (x: number) => (x * 100).toFixed(x < 0.001 ? 4 : 2) + '%';
 const HOVER_HINT = 'Hover over the map.';
 const DIM_ALPHA = 40;
+const CLICK_SLOP = 5; // pointer travel (CSS px) below which a press counts as a click, not a pan
 
 async function main() {
   const N = 4;
@@ -39,6 +41,7 @@ async function main() {
   const legendCanvas = $<HTMLCanvasElement>('legend');
   const legendCtx = legendCanvas.getContext('2d')!;
   const hoverEl = $<HTMLDivElement>('hover');
+  const tipEl = $<HTMLDivElement>('tip');
   const selEl = $<HTMLDivElement>('sel');
   const projEl = $<HTMLSelectElement>('proj');
   const cmapEl = $<HTMLSelectElement>('cmap');
@@ -60,9 +63,12 @@ async function main() {
   let pop: PopularitySelection | null = null; // PINs highlighted by popularity (null = off)
   let drag: { x0: number; y0: number; x1: number; y1: number } | null = null; // selection rectangle (cells)
   let panning: [number, number] | null = null; // last pointer position while panning
+  // a pressed pointer: where it went down, the cell under it, and whether it has travelled far enough to be a pan
+  let down: { px: number; py: number; cell: [number, number] | null; moved: boolean } | null = null;
   let hover: [number, number] | null = null; // hovered cell
   let frame: Frame = { gridW: 1, gridH: 1, viewW: 1, viewH: 1 };
   let vp: Viewport = { x: 0, y: 0, k: 1 };
+  let plot: PlotRect = plotRect(1, 1, N); // map area inside the canvas; the rest is reserved for the axes
 
   // colour image of the grid, one pixel per cell; the visible canvas draws it through the viewport
   const off = document.createElement('canvas');
@@ -185,11 +191,32 @@ async function main() {
     const dpr = window.devicePixelRatio || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, frame.viewW, frame.viewH);
+    ctx.fillRect(0, 0, plot.outerW, plot.outerH);
+
+    // the map, clipped to its area; coordinates inside are relative to the area's top-left corner
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(plot.left, plot.top, plot.width, plot.height);
+    ctx.clip();
+    ctx.translate(plot.left, plot.top);
     ctx.imageSmoothingEnabled = false;
     const [sx, sy] = toScreen(vp, 0, 0);
     ctx.drawImage(off, sx, sy, frame.gridW * vp.k, frame.gridH * vp.k);
 
+    if (hover) {
+      // thin guide lines through the hovered cell, pointing at both axes
+      const [gx, gy] = toScreen(vp, hover[0] + 0.5, hover[1] + 0.5);
+      const lx = Math.round(gx) + 0.5;
+      const ly = Math.round(gy) + 0.5;
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(lx, 0);
+      ctx.lineTo(lx, frame.viewH);
+      ctx.moveTo(0, ly);
+      ctx.lineTo(frame.viewW, ly);
+      ctx.stroke();
+    }
     if (hover && vp.k >= 4) {
       const [hx, hy] = toScreen(vp, hover[0], hover[1]);
       ctx.strokeStyle = '#fff';
@@ -208,6 +235,9 @@ async function main() {
       ctx.lineWidth = 1;
       ctx.strokeRect(rx + 0.5, ry + 0.5, w - 1, h - 1);
     }
+    ctx.restore();
+
+    drawAxes(ctx, plot, vp, proj(), hover);
   }
 
   /** Sizes the canvas to its container and fits the whole grid into view. */
@@ -216,7 +246,8 @@ async function main() {
     const dpr = window.devicePixelRatio || 1;
     canvas.width = Math.round(r.width * dpr);
     canvas.height = Math.round(r.height * dpr);
-    frame = { gridW: proj().width, gridH: proj().height, viewW: r.width, viewH: r.height };
+    plot = plotRect(r.width, r.height, N);
+    frame = { gridW: proj().width, gridH: proj().height, viewW: plot.width, viewH: plot.height };
     vp = fit(frame);
     draw();
   }
@@ -237,15 +268,23 @@ async function main() {
   }
 
   // --- readouts ---
-  function showHover(x: number, y: number) {
-    const pin = proj().toPin(x, y);
+  /** One-line description of a PIN: count, share of all occurrences and rank. */
+  const describePin = (pin: number) => {
     const c = ds.counts[pin];
-    hoverEl.textContent = `PIN ${pad(pin)} · ${fmtInt(c)} occurrences · ${fmtPct(c / ds.total)} · rank #${fmtInt(cov.rank[pin] + 1)}`;
+    return `PIN ${pad(pin)} · ${fmtInt(c)} occurrences · ${fmtPct(c / ds.total)} · rank #${fmtInt(cov.rank[pin] + 1)}`;
+  };
+
+  function showHover(x: number, y: number) {
+    hoverEl.textContent = describePin(proj().toPin(x, y));
   }
 
   function showSelection() {
     if (selection.size === 0) {
-      selEl.textContent = 'Shift+drag a rectangle on the map.';
+      selEl.textContent = 'Click a PIN or Shift+drag a rectangle on the map.';
+      return;
+    }
+    if (selection.size === 1) {
+      selEl.textContent = describePin(selection.values().next().value as number);
       return;
     }
     const top = [...selection]
@@ -256,17 +295,25 @@ async function main() {
     selEl.textContent = `${fmtInt(selection.size)} PINs · ${fmtPct(shareWhere(ds, (p) => selection.has(p)))} of occurrences · top 5: ${top}`;
   }
 
+  /** Adds the PIN to the selection, or removes it when it is already there. */
+  function toggleSelected(pin: number) {
+    if (!selection.delete(pin)) selection.add(pin);
+    showSelection();
+    buildImage();
+  }
+
   // --- pointer geometry ---
   const local = (e: MouseEvent): [number, number] => {
     const r = canvas.getBoundingClientRect();
-    return [e.clientX - r.left, e.clientY - r.top];
+    return [e.clientX - r.left - plot.left, e.clientY - r.top - plot.top]; // relative to the map area
   };
   const rawCell = (px: number, py: number): [number, number] => {
     const [fx, fy] = toCell(vp, px, py);
     return [Math.floor(fx), Math.floor(fy)];
   };
-  /** Cell under the point, or null when the point is outside the grid. */
+  /** Cell under the point, or null when the point is outside the map area or the grid. */
   const cellAt = (px: number, py: number): [number, number] | null => {
+    if (px < 0 || py < 0 || px >= frame.viewW || py >= frame.viewH) return null; // over the axes
     const [x, y] = rawCell(px, py);
     return x >= 0 && y >= 0 && x < frame.gridW && y < frame.gridH ? [x, y] : null;
   };
@@ -275,10 +322,29 @@ async function main() {
     const [x, y] = rawCell(px, py);
     return [Math.min(frame.gridW - 1, Math.max(0, x)), Math.min(frame.gridH - 1, Math.max(0, y))];
   };
+  /** Small label next to the cursor: PIN and rank. Hidden while panning or dragging a rectangle. */
+  function showTip(cell: [number, number] | null, px: number, py: number) {
+    if (!cell || drag !== null || (down !== null && down.moved)) {
+      tipEl.style.display = 'none';
+      return;
+    }
+    const pin = proj().toPin(cell[0], cell[1]);
+    tipEl.textContent = `${pad(pin)} · #${fmtInt(cov.rank[pin] + 1)}`;
+    tipEl.style.display = 'block';
+    const gap = 14;
+    const cx = plot.left + px; // the canvas fills its container, so canvas and container coordinates agree
+    const cy = plot.top + py;
+    const w = tipEl.offsetWidth;
+    const h = tipEl.offsetHeight;
+    const x = cx + gap + w > plot.outerW ? cx - gap - w : cx + gap; // flip at the right and bottom edges
+    const y = cy + gap + h > plot.outerH ? cy - gap - h : cy + gap;
+    tipEl.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+  }
   function updateHover(px: number, py: number) {
     hover = cellAt(px, py);
     if (hover) showHover(hover[0], hover[1]);
     else hoverEl.textContent = HOVER_HINT;
+    showTip(hover, px, py);
   }
 
   // --- events: controls ---
@@ -347,7 +413,7 @@ async function main() {
     draw();
   });
 
-  // --- events: map (drag = pan, Shift+drag = select, wheel / double-click = zoom) ---
+  // --- events: map (click = select a PIN, drag = pan, Shift+drag = select a rectangle, wheel / double-click = zoom) ---
   canvas.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     canvas.setPointerCapture(e.pointerId);
@@ -356,14 +422,19 @@ async function main() {
       const [x, y] = clampedCellAt(px, py);
       drag = { x0: x, y0: y, x1: x, y1: y };
     } else {
+      // click or pan is decided once the pointer has travelled CLICK_SLOP pixels
+      down = { px, py, cell: cellAt(px, py), moved: false };
       panning = [px, py];
-      canvas.style.cursor = 'grabbing';
     }
     draw();
   });
   canvas.addEventListener('pointermove', (e) => {
     const [px, py] = local(e);
-    if (panning) {
+    if (down && !down.moved && Math.hypot(px - down.px, py - down.py) >= CLICK_SLOP) {
+      down.moved = true;
+      canvas.style.cursor = 'grabbing'; // the hand only appears while the map is really being dragged
+    }
+    if (panning && down && down.moved) {
       vp = panBy(vp, frame, px - panning[0], py - panning[1]);
       panning = [px, py];
     }
@@ -371,7 +442,7 @@ async function main() {
     updateHover(px, py);
     draw();
   });
-  function endGesture() {
+  function endGesture(cancelled: boolean) {
     if (drag) {
       const p = proj();
       selection = new Set();
@@ -382,15 +453,19 @@ async function main() {
       showSelection();
       buildImage();
     }
+    const clicked = !cancelled && down !== null && !down.moved ? down.cell : null;
+    down = null;
     panning = null;
     canvas.style.cursor = '';
+    if (clicked) toggleSelected(proj().toPin(clicked[0], clicked[1]));
     draw();
   }
-  canvas.addEventListener('pointerup', endGesture);
-  canvas.addEventListener('pointercancel', endGesture);
+  canvas.addEventListener('pointerup', () => endGesture(false));
+  canvas.addEventListener('pointercancel', () => endGesture(true));
   canvas.addEventListener('pointerleave', () => {
     hover = null;
     hoverEl.textContent = HOVER_HINT;
+    tipEl.style.display = 'none';
     draw();
   });
   canvas.addEventListener(

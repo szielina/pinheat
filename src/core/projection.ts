@@ -2,6 +2,9 @@ export interface Projection {
   name: string;
   width: number;
   height: number;
+  /** Digit positions (0 = A, most significant first) that form the x and y coordinate. */
+  xDigits: number[];
+  yDigits: number[];
   toXY(pin: number): [number, number];
   toPin(x: number, y: number): number;
 }
@@ -20,6 +23,8 @@ export function digitProjection(name: string, n: number, yIdx: number[], xIdx: n
     name,
     width: 10 ** xIdx.length,
     height: 10 ** yIdx.length,
+    xDigits: xIdx,
+    yDigits: yIdx,
     toXY: (pin) => [pack(pin, xIdx), pack(pin, yIdx)],
     toPin: (x, y) => {
       const digs = new Array<number>(n).fill(0);
