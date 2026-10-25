@@ -15,8 +15,15 @@
     #map { width:100%; height:100%; display:block; background:#000; cursor:crosshair; touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
     #tip { position:absolute; left:0; top:0; display:none; pointer-events:none; z-index:2; padding:0 6px; font:11px/18px system-ui, sans-serif; white-space:nowrap; color:var(--fg); background:rgba(15,17,21,.85); border:1px solid var(--line); border-radius:3px; }
     #hint { position:fixed; left:0; top:0; display:none; width:max-content; pointer-events:none; z-index:10; padding:6px 8px; font:12px/1.4 system-ui, sans-serif; color:var(--fg); background:rgba(20,23,29,.97); border:1px solid #3a414d; border-radius:4px; box-shadow:0 2px 8px rgba(0,0,0,.5); }
+    #legendCap { font-size:12px; margin-top:4px; }
+    #legendWrap { position:relative; margin-top:4px; }
     #legend { width:100%; height:12px; display:block; border-radius:2px; }
-    .legend-labels { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:8px; }
+    .mk { position:absolute; display:none; pointer-events:none; box-sizing:border-box; }
+    #mkHover { top:-3px; bottom:-3px; width:2px; margin-left:-1px; background:#fff; outline:1px solid #000; }
+    #mkPick { top:-4px; bottom:-4px; width:8px; margin-left:-4px; border:2px solid #fff; outline:1px solid #000; }
+    #legendTicks { position:relative; height:22px; margin-bottom:6px; font-size:12px; color:var(--muted); }
+    #legendTicks i { position:absolute; top:0; width:1px; height:4px; background:var(--muted); }
+    #legendTicks span { position:absolute; top:5px; white-space:nowrap; }
 
     /* settings panel: accordion sections (<details>) and always-open ones (<section>) share one look */
     .panel { border:1px solid var(--line); border-radius:6px; margin:0 0 12px; }
@@ -44,9 +51,14 @@
     <h1>pinheat</h1>
     <div id="src" class="muted"></div>
     <div id="stage"><canvas id="map"></canvas><div id="tip"></div></div>
-    <canvas id="legend" width="256" height="12"></canvas>
-    <div class="legend-labels"><span id="legendLo"></span><span id="legendMid"></span><span id="legendHi"></span></div>
-    <div id="hover" class="muted">Hover over the map.</div>
+    <div id="legendCap" class="muted"></div>
+    <div id="legendWrap" title="Colour scale. The ticks say what each colour means under the chosen scale. The white line marks the PIN under the cursor, the square marks the clicked PIN.">
+      <canvas id="legend" width="256" height="12"></canvas>
+      <div id="mkHover" class="mk"></div>
+      <div id="mkPick" class="mk"></div>
+    </div>
+    <div id="legendTicks"></div>
+    <div id="hover" class="muted" title="Compared with an average PIN: total occurrences divided by the number of PINs. 1× = as common as if all PINs were equally likely.">Hover over the map.</div>
   </section>
   <aside>
     <div class="row">
@@ -70,7 +82,7 @@
       <div class="body">
         <label title="Count divided by the clip level. Honest, but a few giants dominate."><input type="radio" name="s" value="linear"> linear</label>
         <label title="Linear raised to a power. Below 1 it lifts rare PINs."><input type="radio" name="s" value="gamma"> gamma</label>
-        <label title="Logarithm of the count. Shows the whole range at once."><input type="radio" name="s" value="log"> logarithmic</label>
+        <label title="Logarithm of the count, stretched from the rarest to the commonest PIN. Shows the whole range at once."><input type="radio" name="s" value="log"> logarithmic</label>
         <label title="Colour = place in the ranking, so every shade covers the same number of PINs."><input type="radio" name="s" value="rank"> rank (equalised)</label>
         <label title="Exponent of the gamma scale. Below 1 brightens rare PINs, above 1 darkens them.">gamma <span id="gammaOut" class="muted"></span>
           <input type="range" id="gamma" min="0.1" max="1.5" step="0.05" style="width:100%"></label>

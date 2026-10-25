@@ -1,7 +1,9 @@
 import { shareWhere } from './core/dataset';
 import { projectionsFor } from './core/projection';
 import { classify, tagsFor } from './core/classifier';
-import { makeNormalizer, type ScaleKind } from './core/scale';
+import { makeScale, type Scale, type ScaleKind } from './core/scale';
+import { legendTicks } from './core/legend';
+import { describeLift, fmtX, lift, oneIn } from './core/measure';
 import { COLORMAPS, COLORMAP_IDS, lut, type ColormapId } from './core/colormap';
 import {
   buildCoverage,
@@ -38,7 +40,13 @@ async function main() {
   const pad = (pin: number) => String(pin).padStart(N, '0');
 
   let maxCount = 0;
-  for (const c of ds.counts) if (c > maxCount) maxCount = c;
+  let minCount = Infinity;
+  for (const c of ds.counts) {
+    if (c > maxCount) maxCount = c;
+    if (c < minCount) minCount = c;
+  }
+  if (!isFinite(minCount)) minCount = 0;
+  const avgCount = ds.total / nPins; // occurrences of an average PIN: the reference (1×) of every relative measure
 
   const canvas = $<HTMLCanvasElement>('map');
   const ctx = canvas.getContext('2d')!;
@@ -59,6 +67,10 @@ async function main() {
   const popRange = $<HTMLInputElement>('popRange');
   const popOut = $<HTMLDivElement>('popOut');
   const resetEl = $<HTMLButtonElement>('reset');
+  const legendCapEl = $<HTMLDivElement>('legendCap');
+  const legendTicksEl = $<HTMLDivElement>('legendTicks');
+  const mkHoverEl = $<HTMLDivElement>('mkHover');
+  const mkPickEl = $<HTMLDivElement>('mkPick');
 
   const defaults: ViewState = { p: projIds[0], s: 'log', g: 0.5, t: 0, m: 'viridis', c: 99, n: 0, d: 'top' };
   const state = readState(location.hash, defaults, projIds);
@@ -80,6 +92,7 @@ async function main() {
   /** True while the map itself is being moved (pan or pinch): guide lines and the tooltip stay out of the way. */
   const moving = () => (down !== null && down.moved) || pinch !== null;
   let dpr = window.devicePixelRatio || 1; // pixel ratio the canvas backing store was sized for (see layout)
+  let scale: Scale; // current colour scale; buildImage() creates it, the legend and its markers reuse it
   let plot: PlotRect = plotRect(1, 1, N); // map area inside the canvas; the rest is reserved for the axes
 
   // colour image of the grid, one pixel per cell; the visible canvas draws it through the viewport
@@ -155,7 +168,8 @@ async function main() {
     off.width = p.width;
     off.height = p.height;
     const img = offCtx.createImageData(p.width, p.height);
-    const norm = makeNormalizer(ds.counts, { kind: state.s, gamma: state.g, clipMax: clipMax() });
+    scale = makeScale(ds.counts, { kind: state.s, gamma: state.g, clipMax: clipMax() });
+    const norm = scale.norm;
     const colors = lut(state.m);
     const hasSelection = selection.size > 0;
     const popMember = pop ? pop.member : null;
@@ -175,14 +189,21 @@ async function main() {
     offCtx.putImageData(img, 0, 0);
   }
 
-  const SCALE_LABEL: Record<ScaleKind, string> = {
-    linear: 'linear',
-    gamma: 'gamma',
-    log: 'logarithmic',
-    rank: 'rank-equalised',
-  };
+  /** What the colour bar means under the current scale. */
+  function legendCaption(): string {
+    switch (state.s) {
+      case 'linear':
+        return 'Occurrences relative to an average PIN (1× = all PINs equally common). Linear, brightest from the clip level.';
+      case 'gamma':
+        return `Occurrences relative to an average PIN (1× = all PINs equally common). Gamma ${state.g.toFixed(2)}, brightest from the clip level.`;
+      case 'log':
+        return 'Occurrences relative to an average PIN (1× = all PINs equally common). Logarithmic, from the rarest to the commonest PIN.';
+      case 'rank':
+        return 'Place in the ranking, not the count: every shade holds the same number of PINs.';
+    }
+  }
 
-  /** Colour bar with the value range of the current scale. */
+  /** Colour bar with ticks that say what each colour means under the current scale. */
   function updateLegend() {
     const colors = lut(state.m);
     const w = legendCanvas.width;
@@ -192,10 +213,43 @@ async function main() {
       legendCtx.fillStyle = `rgb(${colors[i]},${colors[i + 1]},${colors[i + 2]})`;
       legendCtx.fillRect(x, 0, 1, h);
     }
-    const clipped = state.s === 'linear' || state.s === 'gamma';
-    $('legendLo').textContent = state.s === 'rank' ? 'least common' : '0';
-    $('legendMid').textContent = state.s === 'gamma' ? `gamma ${state.g.toFixed(2)}` : SCALE_LABEL[state.s];
-    $('legendHi').textContent = state.s === 'rank' ? 'most common' : clipped ? `≥ ${fmtInt(clipMax())}` : fmtInt(maxCount);
+    legendCapEl.textContent = legendCaption();
+    legendTicksEl.textContent = '';
+    const ticks = legendTicks({
+      kind: state.s,
+      avg: avgCount,
+      minCount,
+      maxCount,
+      clipMax: clipMax(),
+      atCount: scale.atCount,
+    });
+    for (const tk of ticks) {
+      const mark = document.createElement('i');
+      mark.style.left = `${tk.t * 100}%`;
+      const label = document.createElement('span');
+      label.textContent = tk.label;
+      label.style.left = `${tk.t * 100}%`;
+      label.style.transform = tk.t < 0.02 ? 'none' : tk.t > 0.98 ? 'translateX(-100%)' : 'translateX(-50%)';
+      legendTicksEl.append(mark, label);
+    }
+    refreshMarkers();
+  }
+
+  /** Puts a marker at the colour of a PIN on the legend bar (null hides it). */
+  function placeMarker(el: HTMLElement, pin: number | null) {
+    if (pin === null) {
+      if (el.style.display !== 'none') el.style.display = 'none';
+      return;
+    }
+    const left = `${(scale.norm(pin) * 100).toFixed(2)}%`;
+    if (el.style.left !== left) el.style.left = left;
+    if (el.style.display !== 'block') el.style.display = 'block';
+  }
+
+  /** Legend markers: the hovered PIN (thin line) and the clicked PIN (square). */
+  function refreshMarkers() {
+    placeMarker(mkHoverEl, hover && !moving() ? proj().toPin(hover[0], hover[1]) : null);
+    placeMarker(mkPickEl, picked);
   }
 
   /** Paints the grid image through the viewport, plus the hover outline and the selection rectangle. */
@@ -265,6 +319,7 @@ async function main() {
     ctx.restore();
 
     drawAxes(ctx, plot, vp, proj(), moving() ? null : hover);
+    refreshMarkers();
   }
 
   /** Sizes the canvas to its container. Refits the whole grid, or (on a mere resize) keeps the current view. */
@@ -295,11 +350,12 @@ async function main() {
   }
 
   // --- readouts ---
-  /** One-line description of a PIN: count, share of all occurrences and rank. */
-  const describePin = (pin: number) => {
-    const c = ds.counts[pin];
-    return `PIN ${pad(pin)} · ${fmtInt(c)} occurrences · ${fmtPct(c / ds.total)} · rank #${fmtInt(cov.rank[pin] + 1)}`;
-  };
+  /** Relative measure of a PIN's count: "3.2× above average". */
+  const liftOf = (pin: number) => lift(ds.counts[pin], ds.total, nPins);
+
+  /** One-line description of a PIN: how it compares with an average PIN, and its rank. */
+  const describePin = (pin: number) =>
+      `PIN ${pad(pin)} · ${describeLift(liftOf(pin))} · rank #${fmtInt(cov.rank[pin] + 1)}`;
 
   function showHover(x: number, y: number) {
     hoverEl.textContent = describePin(proj().toPin(x, y));
@@ -317,32 +373,38 @@ async function main() {
     const top = [...selection]
         .sort((a, b) => ds.counts[b] - ds.counts[a])
         .slice(0, 5)
-        .map((p) => `${pad(p)} (${fmtInt(ds.counts[p])})`)
+        .map((p) => `${pad(p)} (${fmtX(liftOf(p))})`)
         .join(', ');
-    selEl.textContent = `${fmtInt(selection.size)} PINs · ${fmtPct(shareWhere(ds, (p) => selection.has(p)))} of occurrences · top 5: ${top}`;
+    const share = shareWhere(ds, (p) => selection.has(p));
+    const avgLift = (share * nPins) / selection.size; // concentration: share of occurrences / share of PINs
+    selEl.textContent =
+        `${fmtInt(selection.size)} PINs · ${fmtPct(share)} of occurrences in ${fmtPct(selection.size / nPins)} of PINs ` +
+        `(${describeLift(avgLift)}) · top 5: ${top}`;
   }
 
   /** Statistics of the clicked PIN, always visible in their own section. */
   function showPicked() {
     pickEl.textContent = '';
-    const line = (text: string, big = false) => {
+    const line = (text: string, big = false, muted = false) => {
       const d = document.createElement('div');
       d.textContent = text;
       if (big) d.style.cssText = 'font-size:16px;font-weight:600';
+      if (muted) d.className = 'muted';
       pickEl.appendChild(d);
     };
     if (picked === null) {
-      line('Click a PIN on the map.');
-      pickEl.firstElementChild!.className = 'muted';
+      line('Click a PIN on the map.', false, true);
       return;
     }
     const c = ds.counts[picked];
     const rank = cov.rank[picked] + 1;
     const matched = tags.filter((_, i) => (mask[picked as number] & (1 << i)) !== 0).map((t) => t.label);
+    const n = oneIn(c, ds.total);
     line(`PIN ${pad(picked)}`, true);
-    line(`${fmtInt(c)} occurrences · ${fmtPct(c / ds.total)} of all`);
+    line(describeLift(liftOf(picked)));
     line(`rank #${fmtInt(rank)} of ${fmtInt(nPins)} · top ${fmtPct(rank / nPins)} of PINs`);
     line(matched.length > 0 ? `tags: ${matched.join(', ')}` : 'tags: none');
+    line(`${fmtInt(c)} occurrences${n === null ? '' : ` · 1 in ${fmtInt(Math.round(+n.toPrecision(3)))} of all`}`, false, true);
   }
 
   /** Clicking a PIN selects it; clicking it again (or another PIN) deselects / replaces it. */
