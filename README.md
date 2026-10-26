@@ -43,7 +43,7 @@ not in new data but in how those 10,000 numbers are sliced and labelled.
 
 ## Quick start
 
-Requires Node.js 18 or newer.
+Requires Node.js 20.19 or newer (or 22.12+).
 
     npm install
     npm run data      # one-off: fetches public/pins4.bin from HIBP
