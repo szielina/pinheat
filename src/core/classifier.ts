@@ -1,3 +1,16 @@
+import {
+  boxOf,
+  distinctCount,
+  fitsIn2x2,
+  isEdgeMiddle,
+  keyDistance,
+  NUMPAD,
+  repeatedPair,
+  squareKind,
+  type KeypadLayout,
+  type SquareKind,
+} from './keypad';
+
 export interface Tag {
   id: string;
   label: string;
@@ -52,7 +65,68 @@ export const TAGS4: Tag[] = [
   },
 ];
 
-export const tagsFor = (n: number): Tag[] => (n === 4 ? TAGS4 : []);
+const SQUARE_LABEL: Record<SquareKind, string> = {
+  z: 'Keypad square: Z, along rows (1245)',
+  n: 'Keypad square: N, along columns (2536)',
+  around: 'Keypad square: round the block (6325)',
+  cross: 'Keypad square: cross (1524)',
+};
+
+/**
+ * Tags built on the geometry of a keypad. The layout is a parameter, so a phone keypad can be swapped in later.
+ * Four-key squares need a 2 × 2 block, so the 0 key never takes part in them; it can in the three-key tags.
+ */
+export function keypadTags(l: KeypadLayout): Tag[] {
+  const squares = (Object.keys(SQUARE_LABEL) as SquareKind[]).map<Tag>((kind) => ({
+    id: `kp-${kind}`,
+    label: SQUARE_LABEL[kind],
+    test: (d) => squareKind(l, d) === kind,
+  }));
+  const pairDistance = (d: number[]) => {
+    const p = repeatedPair(d);
+    return p === null ? null : keyDistance(l, p[0], p[1]);
+  };
+  return [
+    ...squares,
+    {
+      id: 'kp-compact',
+      label: 'Keypad: 3 keys in a 2×2 block (8985)',
+      test: (d) => distinctCount(d) === 3 && fitsIn2x2(l, d),
+    },
+    {
+      id: 'kp-line',
+      label: 'Keypad: 3 keys in a row or column (8789)',
+      test: (d) => {
+        const b = boxOf(l, d);
+        return distinctCount(d) === 3 && (b.rows === 0 || b.cols === 0);
+      },
+    },
+    {
+      id: 'kp-diamond',
+      label: 'Keypad: 3–4 of the keys 2, 4, 6, 8 (4268)',
+      test: (d) => distinctCount(d) >= 3 && d.every((k) => isEdgeMiddle(l, k)),
+    },
+    {
+      // AABB / ABAB; keys two or more steps apart. Pairs 1.5 apart (only 0 and 3 on a PC keypad) belong to neither tag.
+      id: 'kp-far',
+      label: 'Keypad: AABB / ABAB with far keys (1199)',
+      test: (d) => (pairDistance(d) ?? 0) >= 2,
+    },
+    {
+      id: 'kp-near',
+      label: 'Keypad: AABB / ABAB with neighbouring keys (1122)',
+      test: (d) => {
+        const dist = pairDistance(d);
+        return dist !== null && dist <= 1;
+      },
+    },
+  ];
+}
+
+/** 6 pattern tags + 9 keypad tags = 15 of the 16 bits of the mask (Uint16Array). Widen the mask before adding two more. */
+export const TAGS4_ALL: Tag[] = [...TAGS4, ...keypadTags(NUMPAD)];
+
+export const tagsFor = (n: number): Tag[] => (n === 4 ? TAGS4_ALL : []);
 
 /** Bit mask of tags for every PIN; computed once. 4 digits only. */
 export function classify(n: number): Uint16Array {
@@ -65,7 +139,7 @@ export function classify(n: number): Uint16Array {
     d[2] = Math.floor(pin / 10) % 10;
     d[3] = pin % 10;
     let m = 0;
-    TAGS4.forEach((t, i) => {
+    TAGS4_ALL.forEach((t, i) => {
       if (t.test(d)) m |= 1 << i;
     });
     mask[pin] = m;

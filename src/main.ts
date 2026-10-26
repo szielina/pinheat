@@ -117,15 +117,19 @@ async function main() {
 
   const tagShare = tags.map((_, i) => shareWhere(ds, (p) => (mask[p] & (1 << i)) !== 0));
   const restShare = shareWhere(ds, (p) => mask[p] === 0);
+  /** Share of occurrences and how it compares with an average PIN: the tag's share of occurrences / its share of PINs. */
+  const tagStats = (share: number, size: number) => `${fmtPct(share)} · ${size > 0 ? fmtX((share * nPins) / size) : '–'}`;
+  const tagSize = tags.map((_, i) => mask.reduce((n, m) => n + ((m >> i) & 1), 0));
+  const restSize = mask.reduce((n, m) => n + (m === 0 ? 1 : 0), 0);
   tags.forEach((t, i) => {
     const row = document.createElement('label');
-    row.innerHTML = `<input type="checkbox" data-bit="${i}"> ${t.label} <span class="muted">${fmtPct(tagShare[i])}</span>`;
+    row.innerHTML = `<input type="checkbox" data-bit="${i}"> ${t.label} <span class="muted">${tagStats(tagShare[i], tagSize[i])}</span>`;
     row.querySelector('input')!.checked = ((state.t >> i) & 1) === 1;
     tagsEl.appendChild(row);
   });
   const rest = document.createElement('div');
   rest.className = 'muted';
-  rest.textContent = `Remainder (no tag): ${fmtPct(restShare)} · tag shares may overlap`;
+  rest.textContent = `Remainder (no tag): ${tagStats(restShare, restSize)} · tag shares may overlap`;
   tagsEl.appendChild(rest);
 
   /** Enables only the sliders relevant to the chosen scale. */
