@@ -4,3 +4,11 @@ dist/
 .idea/
 *.iml
 *.log
+# local tooling and secrets
+.wrangler/
+.env
+.env.*
+!.env.example
+
+# working file for AI sessions, not part of the project
+pinheat-context*.md
