@@ -19,7 +19,11 @@ import { installHints } from './app/hints';
 import { loadDataset } from './app/load';
 import { readState, writeState, type ViewState } from './app/state';
 
-const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
+const $ = <T extends HTMLElement>(id: string): T => {
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`index.html has no element #${id}`);
+  return el as T;
+};
 const fmtInt = (x: number) => x.toLocaleString('en-US');
 const fmtPct = (x: number) => (x * 100).toFixed(x < 0.001 ? 4 : 2) + '%';
 const HOVER_HINT = 'Hover over the map.';
