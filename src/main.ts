@@ -356,6 +356,9 @@ async function main() {
   const describePin = (pin: number) =>
       `PIN ${pad(pin)} · ${describeLift(liftOf(pin))} · rank #${fmtInt(cov.rank[pin] + 1)}`;
 
+  /** Readout under the map while nothing is hovered: the clicked PIN stays visible (touch has no hover at all). */
+  const idleReadout = () => (picked !== null ? `${describePin(picked)} · selected` : HOVER_HINT);
+
   function showHover(x: number, y: number) {
     hoverEl.textContent = describePin(proj().toPin(x, y));
   }
@@ -409,6 +412,7 @@ async function main() {
   /** Clicking a PIN selects it; clicking it again (or another PIN) deselects / replaces it. */
   function selectPin(pin: number) {
     picked = picked === pin ? null : pin;
+    if (hover === null) hoverEl.textContent = idleReadout();
     showPicked();
   }
 
@@ -453,7 +457,7 @@ async function main() {
   function updateHover(px: number, py: number) {
     hover = cellAt(px, py);
     if (hover) showHover(hover[0], hover[1]);
-    else hoverEl.textContent = HOVER_HINT;
+    else hoverEl.textContent = idleReadout();
     showTip(hover, px, py);
   }
 
@@ -536,7 +540,7 @@ async function main() {
 
   function hideHover() {
     hover = null;
-    hoverEl.textContent = HOVER_HINT;
+    hoverEl.textContent = idleReadout();
     tipEl.style.display = 'none';
   }
 
