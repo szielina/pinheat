@@ -3,6 +3,7 @@ import { projectionsFor } from './core/projection';
 import { classify, tagsFor } from './core/classifier';
 import { makeScale, type Scale, type ScaleKind } from './core/scale';
 import { legendTicks } from './core/legend';
+import { visibleSet } from './core/visibility';
 import { describeLift, enrichment, fmtX, lift, oneIn } from './core/measure';
 import { COLORMAPS, COLORMAP_IDS, lut, type ColormapId } from './core/colormap';
 import {
@@ -168,20 +169,20 @@ async function main() {
     scale = makeScale(ds.counts, { kind: state.s, gamma: state.g, clipMax: clipMax() });
     const norm = scale.norm;
     const colors = lut(state.m);
-    const hasSelection = selection.size > 0;
-    const popMember = pop ? pop.member : null;
+    const visible = visibleSet(nPins, {
+      tagMask: mask,
+      enabledTags: state.t,
+      popularity: pop ? pop.member : null,
+      selection,
+    });
     for (let pin = 0; pin < nPins; pin++) {
       const [x, y] = p.toXY(pin);
       const i = Math.min(255, Math.max(0, Math.round(norm(pin) * 255))) * 3;
-      const visible =
-          (state.t === 0 || (mask[pin] & state.t) !== 0) &&
-          (popMember === null || popMember[pin] === 1) &&
-          (!hasSelection || selection.has(pin));
       const o = (y * p.width + x) * 4;
       img.data[o] = colors[i];
       img.data[o + 1] = colors[i + 1];
       img.data[o + 2] = colors[i + 2];
-      img.data[o + 3] = visible ? 255 : DIM_ALPHA;
+      img.data[o + 3] = visible[pin] === 1 ? 255 : DIM_ALPHA;
     }
     offCtx.putImageData(img, 0, 0);
   }
