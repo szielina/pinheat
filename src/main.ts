@@ -11,6 +11,7 @@ import { createData } from './app/data';
 import { getElements } from './app/dom';
 import { fmtPct } from './app/format';
 import { createGeometry } from './app/geometry';
+import { createPointerHost } from './app/map-host';
 import { installHints } from './app/hints';
 import { loadDataset } from './app/load';
 import { writeState } from './app/state';
@@ -31,15 +32,16 @@ async function main() {
 
   const el = getElements();
   const {
-    canvas, stageEl, hoverEl, tipEl, projEl, cmapEl, gammaEl, gammaOut, clipEl, clipOut, tagsEl,
+    canvas, stageEl, projEl, cmapEl, gammaEl, gammaOut, clipEl, clipOut, tagsEl,
     popN, popRange, resetEl, clearEl,
     scaleRadios, dirRadios, popPresets,
   } = el;
 
   const store = createStore(data);
-  const { buildImage, updateLegend, draw, layout } = createRenderer(data, store, el);
+  const renderer = createRenderer(data, store, el);
+  const { buildImage, updateLegend, draw, layout } = renderer;
   const panels = createPanels(data, store, el);
-  const { showSource, idleReadout, showHover, showSelection, showPicked, showPopularity, showTip } = panels;
+  const { showSource, showSelection, showPicked, showPopularity } = panels;
 
   showSource();
 
@@ -113,22 +115,10 @@ async function main() {
     commit();
   }
 
-  /** Clicking a PIN selects it; clicking it again (or another PIN) deselects / replaces it. */
-  function selectPin(pin: number) {
-    store.picked = store.picked === pin ? null : pin;
-    if (store.hover === null) hoverEl.textContent = idleReadout();
-    showPicked();
-  }
-
   // --- pointer geometry ---
-  const { local, cellAt, clampedCellAt } = createGeometry(canvas, store);
-  function updateHover(px: number, py: number) {
-    store.hover = cellAt(px, py);
-    if (store.hover) showHover(store.hover[0], store.hover[1]);
-    else hoverEl.textContent = idleReadout();
-    showTip(store.hover, px, py);
-  }
-
+  const geometry = createGeometry(canvas, store);
+  const { local, cellAt, clampedCellAt } = geometry;
+  const { updateHover, hideHover, selectPin, selectionChanged } = createPointerHost(store, el, geometry, panels, renderer);
   // --- events: controls ---
   projEl.addEventListener('change', () => {
     store.view.p = projEl.value;
@@ -186,8 +176,7 @@ async function main() {
   );
   clearEl.addEventListener('click', () => {
     store.selection = new Set();
-    showSelection();
-    buildImage();
+    selectionChanged();
     draw();
   });
   resetEl.addEventListener('click', () => {
@@ -204,12 +193,6 @@ async function main() {
   function pinchGeometry() {
     const [a, b] = [...store.pointers.values()];
     return { dist: Math.hypot(b[0] - a[0], b[1] - a[1]), cx: (a[0] + b[0]) / 2, cy: (a[1] + b[1]) / 2 };
-  }
-
-  function hideHover() {
-    store.hover = null;
-    hoverEl.textContent = idleReadout();
-    tipEl.style.display = 'none';
   }
 
   canvas.addEventListener('pointerdown', (e) => {
@@ -303,8 +286,7 @@ async function main() {
         for (let xx = Math.min(store.drag.x0, store.drag.x1); xx <= Math.max(store.drag.x0, store.drag.x1); xx++)
           store.selection.add(p.toPin(xx, yy));
       store.drag = null;
-      showSelection();
-      buildImage();
+      selectionChanged();
     }
     const pressed = store.down;
     store.down = null;
