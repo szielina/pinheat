@@ -2,13 +2,23 @@ export interface Dataset {
   digits: number;
   counts: Uint32Array;
   total: number;
+  /** Fewest and most occurrences of any single PIN. */
+  minCount: number;
+  maxCount: number;
   source: 'hibp' | 'demo';
 }
 
 export function makeDataset(digits: number, counts: Uint32Array, source: Dataset['source']): Dataset {
   let total = 0;
-  for (let i = 0; i < counts.length; i++) total += counts[i];
-  return { digits, counts, total, source };
+  let minCount = Infinity;
+  let maxCount = 0;
+  for (let i = 0; i < counts.length; i++) {
+    total += counts[i];
+    if (counts[i] < minCount) minCount = counts[i];
+    if (counts[i] > maxCount) maxCount = counts[i];
+  }
+  if (!isFinite(minCount)) minCount = 0; // empty data set
+  return { digits, counts, total, minCount, maxCount, source };
 }
 
 export function shareWhere(ds: Dataset, pred: (pin: number) => boolean): number {

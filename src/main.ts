@@ -39,13 +39,7 @@ async function main() {
   const nPins = ds.counts.length;
   const pad = (pin: number) => String(pin).padStart(N, '0');
 
-  let maxCount = 0;
-  let minCount = Infinity;
-  for (const c of ds.counts) {
-    if (c > maxCount) maxCount = c;
-    if (c < minCount) minCount = c;
-  }
-  if (!isFinite(minCount)) minCount = 0;
+  const { minCount, maxCount } = ds;
   const avgCount = ds.total / nPins; // occurrences of an average PIN: the reference (1×) of every relative measure
 
   const canvas = $<HTMLCanvasElement>('map');
