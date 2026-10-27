@@ -3,7 +3,7 @@ import { projectionsFor } from './core/projection';
 import { classify, tagsFor } from './core/classifier';
 import { makeScale, type Scale, type ScaleKind } from './core/scale';
 import { legendTicks } from './core/legend';
-import { describeLift, fmtX, lift, oneIn } from './core/measure';
+import { describeLift, enrichment, fmtX, lift, oneIn } from './core/measure';
 import { COLORMAPS, COLORMAP_IDS, lut, type ColormapId } from './core/colormap';
 import {
   buildCoverage,
@@ -112,7 +112,7 @@ async function main() {
   const tagShare = tags.map((_, i) => shareWhere(ds, (p) => (mask[p] & (1 << i)) !== 0));
   const restShare = shareWhere(ds, (p) => mask[p] === 0);
   /** Share of occurrences and how it compares with an average PIN: the tag's share of occurrences / its share of PINs. */
-  const tagStats = (share: number, size: number) => `${fmtPct(share)} · ${size > 0 ? fmtX((share * nPins) / size) : '–'}`;
+  const tagStats = (share: number, size: number) => `${fmtPct(share)} · ${size > 0 ? fmtX(enrichment(share, size, nPins)) : '–'}`;
   const tagSize = tags.map((_, i) => mask.reduce((n, m) => n + ((m >> i) & 1), 0));
   const restSize = mask.reduce((n, m) => n + (m === 0 ? 1 : 0), 0);
   tags.forEach((t, i) => {
@@ -373,7 +373,7 @@ async function main() {
         .map((p) => `${pad(p)} (${fmtX(liftOf(p))})`)
         .join(', ');
     const share = shareWhere(ds, (p) => selection.has(p));
-    const avgLift = (share * nPins) / selection.size; // concentration: share of occurrences / share of PINs
+    const avgLift = enrichment(share, selection.size, nPins);
     selEl.textContent =
         `${fmtInt(selection.size)} PINs · ${fmtPct(share)} of occurrences in ${fmtPct(selection.size / nPins)} of PINs ` +
         `(${describeLift(avgLift)}) · top 5: ${top}`;

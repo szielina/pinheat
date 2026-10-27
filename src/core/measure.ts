@@ -5,6 +5,14 @@ export function lift(count: number, total: number, nPins: number): number {
   return total > 0 && nPins > 0 ? (count * nPins) / total : 0;
 }
 
+/**
+ * How much more common than chance a set of PINs is: its share of all occurrences divided by its share of
+ * all PINs (1 = no more common than if every PIN were equally likely). 0 for an empty set.
+ */
+export function enrichment(share: number, size: number, nPins: number): number {
+  return size > 0 && nPins > 0 ? (share * nPins) / size : 0;
+}
+
 /** "3.2×", "0.05×", "1,200×": two significant digits. */
 export function fmtX(v: number): string {
   const r = +v.toPrecision(2);
