@@ -35,6 +35,13 @@ export function readState(hash: string, def: ViewState, validProjections: string
   };
 }
 
+const WRITE_DELAY_MS = 250;
+let pendingWrite = 0;
+
+/**
+ * Puts the state into the URL hash. Debounced: a slider fires dozens of events per second, and Safari throws a
+ * SecurityError after ~100 `replaceState` calls in 30 s, which would abort the repaint that follows the call.
+ */
 export function writeState(s: ViewState): void {
   const q = new URLSearchParams({
     p: s.p,
@@ -46,5 +53,13 @@ export function writeState(s: ViewState): void {
     n: String(s.n),
     d: s.d,
   });
-  history.replaceState(null, '', '#' + q.toString());
+  const hash = '#' + q.toString(); // snapshot now: `s` keeps changing until the timer fires
+  window.clearTimeout(pendingWrite);
+  pendingWrite = window.setTimeout(() => {
+    try {
+      history.replaceState(null, '', hash);
+    } catch {
+      // the URL is a convenience; losing an update is better than breaking the page
+    }
+  }, WRITE_DELAY_MS);
 }
