@@ -8,16 +8,16 @@ import {
   selectByPopularity,
   valueAtPercentile,
   type PopularityDirection,
-  type PopularitySelection,
 } from './core/coverage';
-import { fit, panBy, toCell, toScreen, zoomAt, type Frame, type Viewport } from './core/viewport';
-import { drawAxes, plotRect, type PlotRect } from './app/axes';
+import { fit, panBy, toCell, toScreen, zoomAt } from './core/viewport';
+import { drawAxes, plotRect } from './app/axes';
 import { createData } from './app/data';
 import { getElements } from './app/dom';
 import { fmtInt, fmtPct } from './app/format';
 import { installHints } from './app/hints';
 import { loadDataset } from './app/load';
-import { readState, writeState, type ViewState } from './app/state';
+import { writeState } from './app/state';
+import { createStore, isMoving } from './app/store';
 
 const HOVER_HINT = 'Hover over the map.';
 const DIM_ALPHA = 40;
@@ -41,28 +41,10 @@ async function main() {
   const ctx = canvas.getContext('2d')!;
   const legendCtx = legendCanvas.getContext('2d')!;
 
-  const defaults: ViewState = { p: projIds[0], s: 'log', g: 0.5, t: 0, m: 'viridis', c: 99, n: 0, d: 'top' };
-  const state = readState(location.hash, defaults, projIds, tagIds);
-  const proj = () => projections[state.p];
+  const store = createStore(data);
 
-  let selection = new Set<number>();
-  let pop: PopularitySelection | null = null; // PINs highlighted by popularity (null = off)
-  let drag: { x0: number; y0: number; x1: number; y1: number } | null = null; // selection rectangle (cells)
-  let panning: [number, number] | null = null; // last pointer position while panning
-  // a pressed pointer: where it went down, the cell under it, and whether it has travelled far enough to be a pan
-  let down: { px: number; py: number; cell: [number, number] | null; moved: boolean; slop: number } | null = null;
-  const pointers = new Map<number, [number, number]>(); // pressed pointers (map-area coordinates), in press order
-  let pinch: { dist: number; cx: number; cy: number } | null = null; // two-finger gesture in progress
-  let lastClick: { t: number; px: number; py: number } | null = null; // for double-click / double-tap zoom
-  let picked: number | null = null; // PIN selected by clicking; it has its own section and does not dim the map
-  let hover: [number, number] | null = null; // hovered cell
-  let frame: Frame = { gridW: 1, gridH: 1, viewW: 1, viewH: 1 };
-  let vp: Viewport = { x: 0, y: 0, k: 1 };
-  /** True while the map itself is being moved (pan or pinch): guide lines and the tooltip stay out of the way. */
-  const moving = () => (down !== null && down.moved) || pinch !== null;
   let dpr = window.devicePixelRatio || 1; // pixel ratio the canvas backing store was sized for (see layout)
   let scale: Scale; // current colour scale; buildImage() creates it, the legend and its markers reuse it
-  let plot: PlotRect = plotRect(1, 1, N); // map area inside the canvas; the rest is reserved for the axes
 
   // colour image of the grid, one pixel per cell; the visible canvas draws it through the viewport
   const off = document.createElement('canvas');
@@ -75,12 +57,12 @@ async function main() {
 
   // --- controls ---
   for (const id of projIds) projEl.add(new Option(projections[id].name, id));
-  projEl.value = state.p;
+  projEl.value = store.view.p;
   for (const id of COLORMAP_IDS) cmapEl.add(new Option(COLORMAPS[id].label, id));
-  cmapEl.value = state.m;
-  scaleRadios.forEach((r) => (r.checked = r.value === state.s));
-  gammaEl.value = String(state.g);
-  clipEl.value = String(state.c);
+  cmapEl.value = store.view.m;
+  scaleRadios.forEach((r) => (r.checked = r.value === store.view.s));
+  gammaEl.value = String(store.view.g);
+  clipEl.value = String(store.view.c);
   popN.max = String(nPins);
   popRange.max = String(nPins);
 
@@ -95,7 +77,7 @@ async function main() {
     const box = document.createElement('input');
     box.type = 'checkbox';
     box.dataset.bit = String(i);
-    box.checked = ((state.t >> i) & 1) === 1;
+    box.checked = ((store.view.t >> i) & 1) === 1;
     const stats = document.createElement('span');
     stats.className = 'muted';
     stats.textContent = tagStats(tagShare[i], tagSize[i]);
@@ -109,51 +91,51 @@ async function main() {
 
   /** Enables only the sliders relevant to the chosen scale. */
   function syncControls() {
-    gammaEl.disabled = state.s !== 'gamma';
-    clipEl.disabled = state.s !== 'linear' && state.s !== 'gamma';
-    gammaOut.textContent = state.g.toFixed(2);
-    clipOut.textContent = `${state.c}%`;
+    gammaEl.disabled = store.view.s !== 'gamma';
+    clipEl.disabled = store.view.s !== 'linear' && store.view.s !== 'gamma';
+    gammaOut.textContent = store.view.g.toFixed(2);
+    clipOut.textContent = `${store.view.c}%`;
   }
 
-  const clipMax = () => Math.max(1, valueAtPercentile(ds, cov, state.c));
+  const clipMax = () => Math.max(1, valueAtPercentile(ds, cov, store.view.c));
 
   // --- popularity filter ---
   function recomputePopularity() {
-    state.n = Math.min(nPins, Math.max(0, Math.round(state.n)));
-    pop = state.n > 0 ? selectByPopularity(ds, cov, state.n, state.d) : null;
+    store.view.n = Math.min(nPins, Math.max(0, Math.round(store.view.n)));
+    store.pop = store.view.n > 0 ? selectByPopularity(ds, cov, store.view.n, store.view.d) : null;
   }
 
   /** Mirrors the state into the radios, the number field and the slider. */
   function syncPopularityControls(skipNumberField: boolean) {
-    if (!skipNumberField) popN.value = String(state.n);
-    popRange.value = String(state.n);
-    dirRadios.forEach((r) => (r.checked = r.value === state.d));
+    if (!skipNumberField) popN.value = String(store.view.n);
+    popRange.value = String(store.view.n);
+    dirRadios.forEach((r) => (r.checked = r.value === store.view.d));
   }
 
   function showPopularity() {
-    if (!pop) {
+    if (!store.pop) {
       popOut.textContent = 'Pick a number of PINs to highlight them on the map.';
       return;
     }
-    const label = state.d === 'top' ? 'Most common' : 'Least common';
-    popOut.textContent = `${label}: ${fmtInt(pop.size)} PINs · ${fmtPct(pop.size / nPins)} of space · ${fmtPct(pop.share)} of occurrences`;
+    const label = store.view.d === 'top' ? 'Most common' : 'Least common';
+    popOut.textContent = `${label}: ${fmtInt(store.pop.size)} PINs · ${fmtPct(store.pop.size / nPins)} of space · ${fmtPct(store.pop.share)} of occurrences`;
   }
 
   // --- rendering ---
   /** Recolours the grid image: after a change of colours, scale, filters or selection. */
   function buildImage() {
-    const p = proj();
+    const p = store.proj();
     off.width = p.width;
     off.height = p.height;
     const img = offCtx.createImageData(p.width, p.height);
-    scale = makeScale(ds.counts, { kind: state.s, gamma: state.g, clipMax: clipMax() });
+    scale = makeScale(ds.counts, { kind: store.view.s, gamma: store.view.g, clipMax: clipMax() });
     const norm = scale.norm;
-    const colors = lut(state.m);
+    const colors = lut(store.view.m);
     const visible = visibleSet(nPins, {
       tagMask: mask,
-      enabledTags: state.t,
-      popularity: pop ? pop.member : null,
-      selection,
+      enabledTags: store.view.t,
+      popularity: store.pop ? store.pop.member : null,
+      selection: store.selection,
     });
     for (let pin = 0; pin < nPins; pin++) {
       const [x, y] = p.toXY(pin);
@@ -169,11 +151,11 @@ async function main() {
 
   /** What the colour bar means under the current scale. */
   function legendCaption(): string {
-    switch (state.s) {
+    switch (store.view.s) {
       case 'linear':
         return 'Occurrences relative to an average PIN (1× = all PINs equally common). Linear, brightest from the clip level.';
       case 'gamma':
-        return `Occurrences relative to an average PIN (1× = all PINs equally common). Gamma ${state.g.toFixed(2)}, brightest from the clip level.`;
+        return `Occurrences relative to an average PIN (1× = all PINs equally common). Gamma ${store.view.g.toFixed(2)}, brightest from the clip level.`;
       case 'log':
         return 'Occurrences relative to an average PIN (1× = all PINs equally common). Logarithmic, from the rarest to the commonest PIN.';
       case 'rank':
@@ -183,7 +165,7 @@ async function main() {
 
   /** Colour bar with ticks that say what each colour means under the current scale. */
   function updateLegend() {
-    const colors = lut(state.m);
+    const colors = lut(store.view.m);
     const w = legendCanvas.width;
     const h = legendCanvas.height;
     for (let x = 0; x < w; x++) {
@@ -194,7 +176,7 @@ async function main() {
     legendCapEl.textContent = legendCaption();
     legendTicksEl.textContent = '';
     const ticks = legendTicks({
-      kind: state.s,
+      kind: store.view.s,
       avg: avgCount,
       minCount,
       maxCount,
@@ -226,8 +208,8 @@ async function main() {
 
   /** Legend markers: the hovered PIN (thin line) and the clicked PIN (square). */
   function refreshMarkers() {
-    placeMarker(mkHoverEl, hover && !moving() ? proj().toPin(hover[0], hover[1]) : null);
-    placeMarker(mkPickEl, picked);
+    placeMarker(mkHoverEl, store.hover && !isMoving(store) ? store.proj().toPin(store.hover[0], store.hover[1]) : null);
+    placeMarker(mkPickEl, store.picked);
   }
 
   /** Paints the grid image through the viewport, plus the hover outline and the selection rectangle. */
@@ -238,43 +220,43 @@ async function main() {
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, plot.outerW, plot.outerH);
+    ctx.fillRect(0, 0, store.plot.outerW, store.plot.outerH);
 
     // the map, clipped to its area; coordinates inside are relative to the area's top-left corner
     ctx.save();
     ctx.beginPath();
-    ctx.rect(plot.left, plot.top, plot.width, plot.height);
+    ctx.rect(store.plot.left, store.plot.top, store.plot.width, store.plot.height);
     ctx.clip();
-    ctx.translate(plot.left, plot.top);
+    ctx.translate(store.plot.left, store.plot.top);
     ctx.imageSmoothingEnabled = false;
-    const [sx, sy] = toScreen(vp, 0, 0);
-    ctx.drawImage(off, sx, sy, frame.gridW * vp.k, frame.gridH * vp.k);
+    const [sx, sy] = toScreen(store.vp, 0, 0);
+    ctx.drawImage(off, sx, sy, store.frame.gridW * store.vp.k, store.frame.gridH * store.vp.k);
 
-    if (hover && !moving()) {
+    if (store.hover && !isMoving(store)) {
       // thin guide lines through the hovered cell, pointing at both axes
-      const [gx, gy] = toScreen(vp, hover[0] + 0.5, hover[1] + 0.5);
+      const [gx, gy] = toScreen(store.vp, store.hover[0] + 0.5, store.hover[1] + 0.5);
       const lx = Math.round(gx) + 0.5;
       const ly = Math.round(gy) + 0.5;
       ctx.strokeStyle = 'rgba(255,255,255,0.35)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(lx, 0);
-      ctx.lineTo(lx, frame.viewH);
+      ctx.lineTo(lx, store.frame.viewH);
       ctx.moveTo(0, ly);
-      ctx.lineTo(frame.viewW, ly);
+      ctx.lineTo(store.frame.viewW, ly);
       ctx.stroke();
     }
-    if (hover && !moving() && vp.k >= 4) {
-      const [hx, hy] = toScreen(vp, hover[0], hover[1]);
+    if (store.hover && !isMoving(store) && store.vp.k >= 4) {
+      const [hx, hy] = toScreen(store.vp, store.hover[0], store.hover[1]);
       ctx.strokeStyle = '#fff';
       ctx.lineWidth = 1;
-      ctx.strokeRect(hx + 0.5, hy + 0.5, vp.k - 1, vp.k - 1);
+      ctx.strokeRect(hx + 0.5, hy + 0.5, store.vp.k - 1, store.vp.k - 1);
     }
-    if (picked !== null) {
+    if (store.picked !== null) {
       // square around the clicked PIN: dark outline under a light one, readable on every palette
-      const [pcx, pcy] = proj().toXY(picked);
-      const [mx, my] = toScreen(vp, pcx + 0.5, pcy + 0.5);
-      const s = Math.max(vp.k + 2, 9);
+      const [pcx, pcy] = store.proj().toXY(store.picked);
+      const [mx, my] = toScreen(store.vp, pcx + 0.5, pcy + 0.5);
+      const s = Math.max(store.vp.k + 2, 9);
       ctx.lineWidth = 3.5;
       ctx.strokeStyle = '#000';
       ctx.strokeRect(mx - s / 2, my - s / 2, s, s);
@@ -282,12 +264,12 @@ async function main() {
       ctx.strokeStyle = '#fff';
       ctx.strokeRect(mx - s / 2, my - s / 2, s, s);
     }
-    if (drag) {
-      const x0 = Math.min(drag.x0, drag.x1);
-      const y0 = Math.min(drag.y0, drag.y1);
-      const [rx, ry] = toScreen(vp, x0, y0);
-      const w = (Math.abs(drag.x1 - drag.x0) + 1) * vp.k;
-      const h = (Math.abs(drag.y1 - drag.y0) + 1) * vp.k;
+    if (store.drag) {
+      const x0 = Math.min(store.drag.x0, store.drag.x1);
+      const y0 = Math.min(store.drag.y0, store.drag.y1);
+      const [rx, ry] = toScreen(store.vp, x0, y0);
+      const w = (Math.abs(store.drag.x1 - store.drag.x0) + 1) * store.vp.k;
+      const h = (Math.abs(store.drag.y1 - store.drag.y0) + 1) * store.vp.k;
       ctx.fillStyle = 'rgba(255,255,255,0.15)';
       ctx.fillRect(rx, ry, w, h);
       ctx.strokeStyle = '#fff';
@@ -296,7 +278,7 @@ async function main() {
     }
     ctx.restore();
 
-    drawAxes(ctx, plot, vp, proj(), moving() ? null : hover);
+    drawAxes(ctx, store.plot, store.vp, store.proj(), isMoving(store) ? null : store.hover);
     refreshMarkers();
   }
 
@@ -306,14 +288,14 @@ async function main() {
     dpr = window.devicePixelRatio || 1;
     canvas.width = Math.round(r.width * dpr);
     canvas.height = Math.round(r.height * dpr);
-    plot = plotRect(r.width, r.height, N);
-    frame = { gridW: proj().width, gridH: proj().height, viewW: plot.width, viewH: plot.height };
-    vp = refit ? fit(frame) : panBy(vp, frame, 0, 0); // panBy re-clamps the view to the new frame
+    store.plot = plotRect(r.width, r.height, N);
+    store.frame = { gridW: store.proj().width, gridH: store.proj().height, viewW: store.plot.width, viewH: store.plot.height };
+    store.vp = refit ? fit(store.frame) : panBy(store.vp, store.frame, 0, 0); // panBy re-clamps the view to the new frame
     draw();
   }
 
   function commit() {
-    writeState(state, tagIds);
+    writeState(store.view, tagIds);
     buildImage();
     updateLegend();
     draw();
@@ -322,7 +304,7 @@ async function main() {
   /** Applies state.n and state.d: recomputes the set, syncs the controls, repaints. */
   function applyPopularity(fromNumberField = false) {
     recomputePopularity();
-    syncPopularityControls(fromNumberField && Number(popN.value) === state.n);
+    syncPopularityControls(fromNumberField && Number(popN.value) === store.view.n);
     showPopularity();
     commit();
   }
@@ -336,30 +318,30 @@ async function main() {
       `PIN ${pad(pin)} · ${describeLift(liftOf(pin))} · rank #${fmtInt(cov.rank[pin] + 1)}`;
 
   /** Readout under the map while nothing is hovered: the clicked PIN stays visible (touch has no hover at all). */
-  const idleReadout = () => (picked !== null ? `${describePin(picked)} · selected` : HOVER_HINT);
+  const idleReadout = () => (store.picked !== null ? `${describePin(store.picked)} · selected` : HOVER_HINT);
 
   function showHover(x: number, y: number) {
-    hoverEl.textContent = describePin(proj().toPin(x, y));
+    hoverEl.textContent = describePin(store.proj().toPin(x, y));
   }
 
   function showSelection() {
-    if (selection.size === 0) {
+    if (store.selection.size === 0) {
       selEl.textContent = 'Shift+drag a rectangle on the map.';
       return;
     }
-    if (selection.size === 1) {
-      selEl.textContent = describePin(selection.values().next().value as number);
+    if (store.selection.size === 1) {
+      selEl.textContent = describePin(store.selection.values().next().value as number);
       return;
     }
-    const top = [...selection]
+    const top = [...store.selection]
         .sort((a, b) => ds.counts[b] - ds.counts[a])
         .slice(0, 5)
         .map((p) => `${pad(p)} (${fmtX(liftOf(p))})`)
         .join(', ');
-    const share = shareWhere(ds, (p) => selection.has(p));
-    const avgLift = enrichment(share, selection.size, nPins);
+    const share = shareWhere(ds, (p) => store.selection.has(p));
+    const avgLift = enrichment(share, store.selection.size, nPins);
     selEl.textContent =
-        `${fmtInt(selection.size)} PINs · ${fmtPct(share)} of occurrences in ${fmtPct(selection.size / nPins)} of PINs ` +
+        `${fmtInt(store.selection.size)} PINs · ${fmtPct(share)} of occurrences in ${fmtPct(store.selection.size / nPins)} of PINs ` +
         `(${describeLift(avgLift)}) · top 5: ${top}`;
   }
 
@@ -373,16 +355,16 @@ async function main() {
       if (muted) d.className = 'muted';
       pickEl.appendChild(d);
     };
-    if (picked === null) {
+    if (store.picked === null) {
       line('Click a PIN on the map.', false, true);
       return;
     }
-    const c = ds.counts[picked];
-    const rank = cov.rank[picked] + 1;
-    const matched = tags.filter((_, i) => (mask[picked as number] & (1 << i)) !== 0).map((t) => t.label);
+    const c = ds.counts[store.picked];
+    const rank = cov.rank[store.picked] + 1;
+    const matched = tags.filter((_, i) => (mask[store.picked as number] & (1 << i)) !== 0).map((t) => t.label);
     const n = oneIn(c, ds.total);
-    line(`PIN ${pad(picked)}`, true);
-    line(describeLift(liftOf(picked)));
+    line(`PIN ${pad(store.picked)}`, true);
+    line(describeLift(liftOf(store.picked)));
     line(`rank #${fmtInt(rank)} of ${fmtInt(nPins)} · top ${fmtPct(rank / nPins)} of PINs`);
     line(matched.length > 0 ? `tags: ${matched.join(', ')}` : 'tags: none');
     line(`${fmtInt(c)} occurrences${n === null ? '' : ` · 1 in ${fmtInt(Math.round(+n.toPrecision(3)))} of all`}`, false, true);
@@ -390,119 +372,119 @@ async function main() {
 
   /** Clicking a PIN selects it; clicking it again (or another PIN) deselects / replaces it. */
   function selectPin(pin: number) {
-    picked = picked === pin ? null : pin;
-    if (hover === null) hoverEl.textContent = idleReadout();
+    store.picked = store.picked === pin ? null : pin;
+    if (store.hover === null) hoverEl.textContent = idleReadout();
     showPicked();
   }
 
   // --- pointer geometry ---
   const local = (e: MouseEvent): [number, number] => {
     const r = canvas.getBoundingClientRect();
-    return [e.clientX - r.left - plot.left, e.clientY - r.top - plot.top]; // relative to the map area
+    return [e.clientX - r.left - store.plot.left, e.clientY - r.top - store.plot.top]; // relative to the map area
   };
   const rawCell = (px: number, py: number): [number, number] => {
-    const [fx, fy] = toCell(vp, px, py);
+    const [fx, fy] = toCell(store.vp, px, py);
     return [Math.floor(fx), Math.floor(fy)];
   };
   /** Cell under the point, or null when the point is outside the map area or the grid. */
   const cellAt = (px: number, py: number): [number, number] | null => {
-    if (px < 0 || py < 0 || px >= frame.viewW || py >= frame.viewH) return null; // over the axes
+    if (px < 0 || py < 0 || px >= store.frame.viewW || py >= store.frame.viewH) return null; // over the axes
     const [x, y] = rawCell(px, py);
-    return x >= 0 && y >= 0 && x < frame.gridW && y < frame.gridH ? [x, y] : null;
+    return x >= 0 && y >= 0 && x < store.frame.gridW && y < store.frame.gridH ? [x, y] : null;
   };
   /** Cell nearest to the point (for dragging a selection past the edge). */
   const clampedCellAt = (px: number, py: number): [number, number] => {
     const [x, y] = rawCell(px, py);
-    return [Math.min(frame.gridW - 1, Math.max(0, x)), Math.min(frame.gridH - 1, Math.max(0, y))];
+    return [Math.min(store.frame.gridW - 1, Math.max(0, x)), Math.min(store.frame.gridH - 1, Math.max(0, y))];
   };
   /** Small label next to the cursor: PIN and rank. Hidden while panning or dragging a rectangle. */
   function showTip(cell: [number, number] | null, px: number, py: number) {
-    if (!cell || drag !== null || moving()) {
+    if (!cell || store.drag !== null || isMoving(store)) {
       tipEl.style.display = 'none';
       return;
     }
-    const pin = proj().toPin(cell[0], cell[1]);
+    const pin = store.proj().toPin(cell[0], cell[1]);
     tipEl.textContent = `${pad(pin)} · #${fmtInt(cov.rank[pin] + 1)}`;
     tipEl.style.display = 'block';
     const gap = 14;
-    const cx = plot.left + px; // the canvas fills its container, so canvas and container coordinates agree
-    const cy = plot.top + py;
+    const cx = store.plot.left + px; // the canvas fills its container, so canvas and container coordinates agree
+    const cy = store.plot.top + py;
     const w = tipEl.offsetWidth;
     const h = tipEl.offsetHeight;
-    const x = cx + gap + w > plot.outerW ? cx - gap - w : cx + gap; // flip at the right and bottom edges
-    const y = cy + gap + h > plot.outerH ? cy - gap - h : cy + gap;
+    const x = cx + gap + w > store.plot.outerW ? cx - gap - w : cx + gap; // flip at the right and bottom edges
+    const y = cy + gap + h > store.plot.outerH ? cy - gap - h : cy + gap;
     tipEl.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
   }
   function updateHover(px: number, py: number) {
-    hover = cellAt(px, py);
-    if (hover) showHover(hover[0], hover[1]);
+    store.hover = cellAt(px, py);
+    if (store.hover) showHover(store.hover[0], store.hover[1]);
     else hoverEl.textContent = idleReadout();
-    showTip(hover, px, py);
+    showTip(store.hover, px, py);
   }
 
   // --- events: controls ---
   projEl.addEventListener('change', () => {
-    state.p = projEl.value;
-    writeState(state, tagIds);
+    store.view.p = projEl.value;
+    writeState(store.view, tagIds);
     buildImage();
     layout();
   });
   cmapEl.addEventListener('change', () => {
-    state.m = cmapEl.value as ColormapId;
+    store.view.m = cmapEl.value as ColormapId;
     commit();
   });
   scaleRadios.forEach((r) =>
       r.addEventListener('change', () => {
-        state.s = r.value as ScaleKind;
+        store.view.s = r.value as ScaleKind;
         syncControls();
         commit();
       }),
   );
   gammaEl.addEventListener('input', () => {
-    state.g = Number(gammaEl.value);
+    store.view.g = Number(gammaEl.value);
     syncControls();
     commit();
   });
   clipEl.addEventListener('input', () => {
-    state.c = Number(clipEl.value);
+    store.view.c = Number(clipEl.value);
     syncControls();
     commit();
   });
   tagsEl.addEventListener('change', (e) => {
     const input = e.target as HTMLInputElement;
     if (input.dataset.bit === undefined) return;
-    state.t ^= 1 << Number(input.dataset.bit);
+    store.view.t ^= 1 << Number(input.dataset.bit);
     commit();
   });
   dirRadios.forEach((r) =>
       r.addEventListener('change', () => {
-        state.d = r.value as PopularityDirection;
+        store.view.d = r.value as PopularityDirection;
         applyPopularity();
       }),
   );
   popRange.addEventListener('input', () => {
-    state.n = Number(popRange.value);
+    store.view.n = Number(popRange.value);
     applyPopularity();
   });
   popN.addEventListener('input', () => {
     const v = Number(popN.value);
-    state.n = Number.isFinite(v) ? v : 0;
+    store.view.n = Number.isFinite(v) ? v : 0;
     applyPopularity(true);
   });
   popPresets.forEach((b) =>
       b.addEventListener('click', () => {
-        state.n = Number(b.dataset.n);
+        store.view.n = Number(b.dataset.n);
         applyPopularity();
       }),
   );
   clearEl.addEventListener('click', () => {
-    selection = new Set();
+    store.selection = new Set();
     showSelection();
     buildImage();
     draw();
   });
   resetEl.addEventListener('click', () => {
-    vp = fit(frame);
+    store.vp = fit(store.frame);
     draw();
   });
 
@@ -513,12 +495,12 @@ async function main() {
 
   /** Distance and centre of the first two pressed pointers. */
   function pinchGeometry() {
-    const [a, b] = [...pointers.values()];
+    const [a, b] = [...store.pointers.values()];
     return { dist: Math.hypot(b[0] - a[0], b[1] - a[1]), cx: (a[0] + b[0]) / 2, cy: (a[1] + b[1]) / 2 };
   }
 
   function hideHover() {
-    hover = null;
+    store.hover = null;
     hoverEl.textContent = idleReadout();
     tipEl.style.display = 'none';
   }
@@ -527,45 +509,45 @@ async function main() {
     if (e.button !== 0) return;
     canvas.setPointerCapture(e.pointerId);
     const [px, py] = local(e);
-    pointers.set(e.pointerId, [px, py]);
-    if (pointers.size >= 2) {
+    store.pointers.set(e.pointerId, [px, py]);
+    if (store.pointers.size >= 2) {
       // a second finger turns the gesture into a pinch: forget the click, pan or rectangle in progress
-      down = null;
-      panning = null;
-      drag = null;
+      store.down = null;
+      store.panning = null;
+      store.drag = null;
       hideHover();
-      pinch = pinchGeometry();
+      store.pinch = pinchGeometry();
     } else if (e.shiftKey && !isTouch(e)) {
       const [x, y] = clampedCellAt(px, py);
-      drag = { x0: x, y0: y, x1: x, y1: y };
+      store.drag = { x0: x, y0: y, x1: x, y1: y };
     } else {
       // click or pan is decided once the pointer has travelled `slop` pixels
-      down = { px, py, cell: cellAt(px, py), moved: false, slop: isTouch(e) ? TOUCH_CLICK_SLOP : CLICK_SLOP };
-      panning = [px, py];
+      store.down = { px, py, cell: cellAt(px, py), moved: false, slop: isTouch(e) ? TOUCH_CLICK_SLOP : CLICK_SLOP };
+      store.panning = [px, py];
     }
     draw();
   });
   canvas.addEventListener('pointermove', (e) => {
     const [px, py] = local(e);
-    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, [px, py]);
+    if (store.pointers.has(e.pointerId)) store.pointers.set(e.pointerId, [px, py]);
 
-    if (pinch && pointers.size >= 2) {
+    if (store.pinch && store.pointers.size >= 2) {
       const g = pinchGeometry();
-      vp = panBy(vp, frame, g.cx - pinch.cx, g.cy - pinch.cy);
-      if (pinch.dist > 0 && g.dist > 0) vp = zoomAt(vp, frame, g.cx, g.cy, g.dist / pinch.dist);
-      pinch = g;
+      store.vp = panBy(store.vp, store.frame, g.cx - store.pinch.cx, g.cy - store.pinch.cy);
+      if (store.pinch.dist > 0 && g.dist > 0) store.vp = zoomAt(store.vp, store.frame, g.cx, g.cy, g.dist / store.pinch.dist);
+      store.pinch = g;
       draw();
       return;
     }
-    if (down && !down.moved && Math.hypot(px - down.px, py - down.py) >= down.slop) {
-      down.moved = true;
+    if (store.down && !store.down.moved && Math.hypot(px - store.down.px, py - store.down.py) >= store.down.slop) {
+      store.down.moved = true;
       canvas.style.cursor = 'grabbing'; // the hand only appears while the map is really being dragged
     }
-    if (panning && down && down.moved) {
-      vp = panBy(vp, frame, px - panning[0], py - panning[1]);
-      panning = [px, py];
+    if (store.panning && store.down && store.down.moved) {
+      store.vp = panBy(store.vp, store.frame, px - store.panning[0], py - store.panning[1]);
+      store.panning = [px, py];
     }
-    if (drag) [drag.x1, drag.y1] = clampedCellAt(px, py);
+    if (store.drag) [store.drag.x1, store.drag.y1] = clampedCellAt(px, py);
     if (isTouch(e)) hideHover(); // a finger covers the cell anyway; guide lines under it would only get in the way
     else updateHover(px, py);
     draw();
@@ -575,51 +557,51 @@ async function main() {
   function onClick(cell: [number, number] | null, px: number, py: number, touch: boolean) {
     const now = performance.now();
     if (
-        lastClick !== null &&
-        now - lastClick.t < DOUBLE_CLICK_MS &&
-        Math.hypot(px - lastClick.px, py - lastClick.py) < DOUBLE_CLICK_PX
+        store.lastClick !== null &&
+        now - store.lastClick.t < DOUBLE_CLICK_MS &&
+        Math.hypot(px - store.lastClick.px, py - store.lastClick.py) < DOUBLE_CLICK_PX
     ) {
-      lastClick = null;
-      vp = zoomAt(vp, frame, px, py, 2); // the first click of the pair has already selected the PIN
+      store.lastClick = null;
+      store.vp = zoomAt(store.vp, store.frame, px, py, 2); // the first click of the pair has already selected the PIN
       if (!touch) updateHover(px, py);
       return;
     }
-    lastClick = { t: now, px, py };
-    if (cell) selectPin(proj().toPin(cell[0], cell[1]));
+    store.lastClick = { t: now, px, py };
+    if (cell) selectPin(store.proj().toPin(cell[0], cell[1]));
   }
 
   function endPointer(e: PointerEvent, cancelled: boolean) {
-    if (!pointers.delete(e.pointerId)) return; // not a press we tracked (e.g. right button, or already finished)
+    if (!store.pointers.delete(e.pointerId)) return; // not a press we tracked (e.g. right button, or already finished)
     const [px, py] = local(e);
 
-    if (pinch) {
-      if (pointers.size >= 2) {
-        pinch = pinchGeometry(); // a third finger left: carry on with the first two
+    if (store.pinch) {
+      if (store.pointers.size >= 2) {
+        store.pinch = pinchGeometry(); // a third finger left: carry on with the first two
         return;
       }
-      pinch = null;
-      const rest = [...pointers.values()][0];
+      store.pinch = null;
+      const rest = [...store.pointers.values()][0];
       // the finger that stays keeps panning, and its release is never a click
-      down = rest ? { px: rest[0], py: rest[1], cell: null, moved: true, slop: 0 } : null;
-      panning = rest ? [rest[0], rest[1]] : null;
+      store.down = rest ? { px: rest[0], py: rest[1], cell: null, moved: true, slop: 0 } : null;
+      store.panning = rest ? [rest[0], rest[1]] : null;
       canvas.style.cursor = '';
       draw();
       return;
     }
 
-    if (drag) {
-      const p = proj();
-      selection = new Set();
-      for (let yy = Math.min(drag.y0, drag.y1); yy <= Math.max(drag.y0, drag.y1); yy++)
-        for (let xx = Math.min(drag.x0, drag.x1); xx <= Math.max(drag.x0, drag.x1); xx++)
-          selection.add(p.toPin(xx, yy));
-      drag = null;
+    if (store.drag) {
+      const p = store.proj();
+      store.selection = new Set();
+      for (let yy = Math.min(store.drag.y0, store.drag.y1); yy <= Math.max(store.drag.y0, store.drag.y1); yy++)
+        for (let xx = Math.min(store.drag.x0, store.drag.x1); xx <= Math.max(store.drag.x0, store.drag.x1); xx++)
+          store.selection.add(p.toPin(xx, yy));
+      store.drag = null;
       showSelection();
       buildImage();
     }
-    const pressed = down;
-    down = null;
-    panning = null;
+    const pressed = store.down;
+    store.down = null;
+    store.panning = null;
     canvas.style.cursor = '';
     if (!cancelled && pressed && !pressed.moved) onClick(pressed.cell, px, py, isTouch(e));
     draw();
@@ -637,7 +619,7 @@ async function main() {
         e.preventDefault();
         const [px, py] = local(e);
         const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY; // Firefox reports lines, not pixels
-        vp = zoomAt(vp, frame, px, py, Math.exp(-dy * 0.0015));
+        store.vp = zoomAt(store.vp, store.frame, px, py, Math.exp(-dy * 0.0015));
         updateHover(px, py);
         draw();
       },
