@@ -34,8 +34,9 @@ not in new data but in how those 10,000 numbers are sliced and labelled.
 - Zoom and pan, axes labelled with PIN patterns
 - Click a PIN for its stats: how it compares with an average PIN, its rank, its
   tags
-- Pattern tags (dates, years, repeats, sequences, keypad lines, palindromes) with
-  the share of all occurrences each one explains
+- Tags for patterns (dates, years, repeats, sequences, palindromes) and for shapes
+  on a numeric keypad (squares, lines, diamonds), each with the share of all
+  occurrences it explains and how much more common than chance that is
 - "By popularity": highlight the N most (or least) common PINs
 - Rectangle selection (Shift + drag) that survives a change of projection
 - View settings are kept in the URL hash, so a view can be shared by link
