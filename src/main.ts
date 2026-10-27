@@ -123,8 +123,14 @@ async function main() {
   const restSize = mask.reduce((n, m) => n + (m === 0 ? 1 : 0), 0);
   tags.forEach((t, i) => {
     const row = document.createElement('label');
-    row.innerHTML = `<input type="checkbox" data-bit="${i}"> ${t.label} <span class="muted">${tagStats(tagShare[i], tagSize[i])}</span>`;
-    row.querySelector('input')!.checked = ((state.t >> i) & 1) === 1;
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.dataset.bit = String(i);
+    box.checked = ((state.t >> i) & 1) === 1;
+    const stats = document.createElement('span');
+    stats.className = 'muted';
+    stats.textContent = tagStats(tagShare[i], tagSize[i]);
+    row.append(box, ` ${t.label} `, stats); // text nodes only: a tag label never reaches innerHTML
     tagsEl.appendChild(row);
   });
   const rest = document.createElement('div');
