@@ -1,13 +1,10 @@
 import { shareWhere } from './core/dataset';
-import { projectionsFor } from './core/projection';
-import { classify, tagsFor } from './core/classifier';
 import { makeScale, type Scale, type ScaleKind } from './core/scale';
 import { legendTicks } from './core/legend';
 import { visibleSet } from './core/visibility';
 import { describeLift, enrichment, fmtX, lift, oneIn } from './core/measure';
 import { COLORMAPS, COLORMAP_IDS, lut, type ColormapId } from './core/colormap';
 import {
-  buildCoverage,
   selectByPopularity,
   valueAtPercentile,
   type PopularityDirection,
@@ -15,6 +12,7 @@ import {
 } from './core/coverage';
 import { fit, panBy, toCell, toScreen, zoomAt, type Frame, type Viewport } from './core/viewport';
 import { drawAxes, plotRect, type PlotRect } from './app/axes';
+import { createData } from './app/data';
 import { getElements } from './app/dom';
 import { fmtInt, fmtPct } from './app/format';
 import { installHints } from './app/hints';
@@ -31,17 +29,9 @@ const DOUBLE_CLICK_PX = 10;
 async function main() {
   const N = 4;
   const ds = await loadDataset(N, `${import.meta.env.BASE_URL}pins${N}.bin`);
-  const projections = projectionsFor(N);
-  const projIds = Object.keys(projections);
-  const tags = tagsFor(N);
-  const tagIds = tags.map((t) => t.id); // the URL stores tags by id, not by position
-  const mask = classify(N);
-  const cov = buildCoverage(ds);
-  const nPins = ds.counts.length;
-  const pad = (pin: number) => String(pin).padStart(N, '0');
-
+  const data = createData(N, ds);
+  const { cov, nPins, avgCount, projections, projIds, tags, tagIds, mask, pad } = data;
   const { minCount, maxCount } = ds;
-  const avgCount = ds.total / nPins; // occurrences of an average PIN: the reference (1×) of every relative measure
 
   const {
     canvas, legendCanvas, stageEl, srcEl, hoverEl, tipEl, selEl, pickEl, projEl, cmapEl, gammaEl, gammaOut, clipEl, clipOut, tagsEl,
