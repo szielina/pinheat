@@ -123,14 +123,17 @@ export function keypadTags(l: KeypadLayout): Tag[] {
   ];
 }
 
-/** 6 pattern tags + 9 keypad tags = 15 of the 16 bits of the mask (Uint16Array). Widen the mask before adding two more. */
+/** 6 pattern tags + 9 keypad tags = 15. Tags are addressed by bit (`1 << index`) in a Uint32Array, so up to 31 fit. */
 export const TAGS4_ALL: Tag[] = [...TAGS4, ...keypadTags(NUMPAD)];
+
+const MAX_TAGS = 31; // bit 31 would make `1 << 31` negative
+if (TAGS4_ALL.length > MAX_TAGS) throw new Error(`too many tags for a 32-bit mask: ${TAGS4_ALL.length}`);
 
 export const tagsFor = (n: number): Tag[] => (n === 4 ? TAGS4_ALL : []);
 
 /** Bit mask of tags for every PIN; computed once. 4 digits only. */
-export function classify(n: number): Uint16Array {
-  const mask = new Uint16Array(10 ** n);
+export function classify(n: number): Uint32Array {
+  const mask = new Uint32Array(10 ** n);
   if (n !== 4) return mask;
   const d = [0, 0, 0, 0];
   for (let pin = 0; pin < mask.length; pin++) {
