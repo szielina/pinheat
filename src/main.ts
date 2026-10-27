@@ -35,6 +35,7 @@ async function main() {
   const projections = projectionsFor(N);
   const projIds = Object.keys(projections);
   const tags = tagsFor(N);
+  const tagIds = tags.map((t) => t.id); // the URL stores tags by id, not by position
   const mask = classify(N);
   const cov = buildCoverage(ds);
   const nPins = ds.counts.length;
@@ -68,7 +69,7 @@ async function main() {
   const mkPickEl = $<HTMLDivElement>('mkPick');
 
   const defaults: ViewState = { p: projIds[0], s: 'log', g: 0.5, t: 0, m: 'viridis', c: 99, n: 0, d: 'top' };
-  const state = readState(location.hash, defaults, projIds);
+  const state = readState(location.hash, defaults, projIds, tagIds);
   const proj = () => projections[state.p];
 
   let selection = new Set<number>();
@@ -333,7 +334,7 @@ async function main() {
   }
 
   function commit() {
-    writeState(state);
+    writeState(state, tagIds);
     buildImage();
     updateLegend();
     draw();
@@ -459,7 +460,7 @@ async function main() {
   // --- events: controls ---
   projEl.addEventListener('change', () => {
     state.p = projEl.value;
-    writeState(state);
+    writeState(state, tagIds);
     buildImage();
     layout();
   });
