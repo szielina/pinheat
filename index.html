@@ -4,6 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>pinheat</title>
+  <meta name="description" content="Interactive heat map of 4-digit PIN codes from data breaches: choose the projection, colour scale and filters yourself.">
+  <meta name="theme-color" content="#0f1115">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 4'%3E%3Crect width='4' height='4' fill='%23440154'/%3E%3Crect x='1' y='1' width='2' height='2' fill='%2335b779'/%3E%3Crect x='2' y='2' width='1' height='1' fill='%23fde725'/%3E%3C/svg%3E">
   <style>
     :root { color-scheme: dark; --bg:#0f1115; --fg:#e6e6e6; --muted:#8b93a1; --line:#262b34; }
     body { margin:0; font:14px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
@@ -47,12 +50,13 @@
   </style>
 </head>
 <body>
+<noscript><p style="padding:24px">pinheat needs JavaScript: the map is drawn in your browser.</p></noscript>
 <main>
   <section>
     <h1>pinheat</h1>
     <div id="src" class="muted"></div>
     <div class="muted"><a href="https://github.com/szielina/pinheat#readme">What is this? README, data and credits</a></div>
-    <div id="stage"><canvas id="map"></canvas><div id="tip"></div></div>
+    <div id="stage"><canvas id="map" role="img" aria-label="Heat map of 4-digit PINs: each cell is one PIN, the colour is how often it appears in leaked passwords. Details of the hovered or clicked PIN are read out below the map."></canvas><div id="tip"></div></div>
     <div id="legendCap" class="muted"></div>
     <div id="legendWrap" title="Colour scale. The ticks say what each colour means under the chosen scale. The white line marks the PIN under the cursor, the square marks the clicked PIN.">
       <canvas id="legend" width="256" height="12"></canvas>
@@ -76,7 +80,7 @@
 
     <section class="panel">
       <div class="head" title="Statistics of the PIN you clicked on the map. Click it again to deselect, or click another PIN to switch. It does not dim the rest of the map.">Selected PIN</div>
-      <div class="body"><div id="pick"></div></div>
+      <div class="body"><div id="pick" aria-live="polite"></div></div>
     </section>
 
     <details class="panel" open>
