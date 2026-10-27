@@ -14,13 +14,15 @@ export interface PointerHost {
   selectPin(pin: number): void;
   /** `store.selection` was replaced: refresh its readout and the dimming of the map. */
   selectionChanged(): void;
+  /** Paints the map again. */
+  redraw(): void;
 }
 
 export function createPointerHost(store: Store, el: Elements, geometry: Geometry, panels: Panels, renderer: Renderer): PointerHost {
   const { hoverEl, tipEl } = el;
   const { cellAt } = geometry;
   const { idleReadout, showHover, showSelection, showPicked, showTip } = panels;
-  const { buildImage } = renderer;
+  const { buildImage, draw } = renderer;
 
   function updateHover(px: number, py: number) {
     store.hover = cellAt(px, py);
@@ -46,5 +48,5 @@ export function createPointerHost(store: Store, el: Elements, geometry: Geometry
     buildImage();
   }
 
-  return { updateHover, hideHover, selectPin, selectionChanged };
+  return { updateHover, hideHover, selectPin, selectionChanged, redraw: draw };
 }
