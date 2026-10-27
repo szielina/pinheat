@@ -1,6 +1,6 @@
 import { shareWhere } from './core/dataset';
 import type { ScaleKind } from './core/scale';
-import { describeLift, enrichment, fmtX, lift, oneIn } from './core/measure';
+import { enrichment, fmtX } from './core/measure';
 import { COLORMAPS, COLORMAP_IDS, type ColormapId } from './core/colormap';
 import {
   selectByPopularity,
@@ -9,14 +9,14 @@ import {
 import { fit, panBy, toCell, zoomAt } from './core/viewport';
 import { createData } from './app/data';
 import { getElements } from './app/dom';
-import { fmtInt, fmtPct } from './app/format';
+import { fmtPct } from './app/format';
 import { installHints } from './app/hints';
 import { loadDataset } from './app/load';
 import { writeState } from './app/state';
+import { createPanels } from './app/panels';
 import { createRenderer } from './app/renderer';
-import { createStore, isMoving } from './app/store';
+import { createStore } from './app/store';
 
-const HOVER_HINT = 'Hover over the map.';
 const CLICK_SLOP = 5; // pointer travel (CSS px) below which a mouse press counts as a click, not a pan
 const TOUCH_CLICK_SLOP = 10; // fingers are less steady than a mouse
 const DOUBLE_CLICK_MS = 350; // two clicks / taps this close in time and space zoom in
@@ -26,22 +26,21 @@ async function main() {
   const N = 4;
   const ds = await loadDataset(N, `${import.meta.env.BASE_URL}pins${N}.bin`);
   const data = createData(N, ds);
-  const { cov, nPins, projections, projIds, tags, tagIds, mask, pad } = data;
+  const { cov, nPins, projections, projIds, tags, tagIds, mask } = data;
 
   const el = getElements();
   const {
-    canvas, stageEl, srcEl, hoverEl, tipEl, selEl, pickEl, projEl, cmapEl, gammaEl, gammaOut, clipEl, clipOut, tagsEl,
-    popN, popRange, popOut, resetEl, clearEl,
+    canvas, stageEl, hoverEl, tipEl, projEl, cmapEl, gammaEl, gammaOut, clipEl, clipOut, tagsEl,
+    popN, popRange, resetEl, clearEl,
     scaleRadios, dirRadios, popPresets,
   } = el;
 
   const store = createStore(data);
   const { buildImage, updateLegend, draw, layout } = createRenderer(data, store, el);
+  const panels = createPanels(data, store, el);
+  const { showSource, idleReadout, showHover, showSelection, showPicked, showPopularity, showTip } = panels;
 
-  srcEl.textContent =
-      ds.source === 'hibp'
-          ? `HIBP · ${fmtInt(ds.total)} occurrences`
-          : 'DEMO – synthetic data (run `npm run data` to fetch HIBP)';
+  showSource();
 
   // --- controls ---
   for (const id of projIds) projEl.add(new Option(projections[id].name, id));
@@ -98,15 +97,6 @@ async function main() {
     dirRadios.forEach((r) => (r.checked = r.value === store.view.d));
   }
 
-  function showPopularity() {
-    if (!store.pop) {
-      popOut.textContent = 'Pick a number of PINs to highlight them on the map.';
-      return;
-    }
-    const label = store.view.d === 'top' ? 'Most common' : 'Least common';
-    popOut.textContent = `${label}: ${fmtInt(store.pop.size)} PINs · ${fmtPct(store.pop.size / nPins)} of space · ${fmtPct(store.pop.share)} of occurrences`;
-  }
-
   function commit() {
     writeState(store.view, tagIds);
     buildImage();
@@ -120,67 +110,6 @@ async function main() {
     syncPopularityControls(fromNumberField && Number(popN.value) === store.view.n);
     showPopularity();
     commit();
-  }
-
-  // --- readouts ---
-  /** Relative measure of a PIN's count: "3.2× above average". */
-  const liftOf = (pin: number) => lift(ds.counts[pin], ds.total, nPins);
-
-  /** One-line description of a PIN: how it compares with an average PIN, and its rank. */
-  const describePin = (pin: number) =>
-      `PIN ${pad(pin)} · ${describeLift(liftOf(pin))} · rank #${fmtInt(cov.rank[pin] + 1)}`;
-
-  /** Readout under the map while nothing is hovered: the clicked PIN stays visible (touch has no hover at all). */
-  const idleReadout = () => (store.picked !== null ? `${describePin(store.picked)} · selected` : HOVER_HINT);
-
-  function showHover(x: number, y: number) {
-    hoverEl.textContent = describePin(store.proj().toPin(x, y));
-  }
-
-  function showSelection() {
-    if (store.selection.size === 0) {
-      selEl.textContent = 'Shift+drag a rectangle on the map.';
-      return;
-    }
-    if (store.selection.size === 1) {
-      selEl.textContent = describePin(store.selection.values().next().value as number);
-      return;
-    }
-    const top = [...store.selection]
-        .sort((a, b) => ds.counts[b] - ds.counts[a])
-        .slice(0, 5)
-        .map((p) => `${pad(p)} (${fmtX(liftOf(p))})`)
-        .join(', ');
-    const share = shareWhere(ds, (p) => store.selection.has(p));
-    const avgLift = enrichment(share, store.selection.size, nPins);
-    selEl.textContent =
-        `${fmtInt(store.selection.size)} PINs · ${fmtPct(share)} of occurrences in ${fmtPct(store.selection.size / nPins)} of PINs ` +
-        `(${describeLift(avgLift)}) · top 5: ${top}`;
-  }
-
-  /** Statistics of the clicked PIN, always visible in their own section. */
-  function showPicked() {
-    pickEl.textContent = '';
-    const line = (text: string, big = false, muted = false) => {
-      const d = document.createElement('div');
-      d.textContent = text;
-      if (big) d.style.cssText = 'font-size:16px;font-weight:600';
-      if (muted) d.className = 'muted';
-      pickEl.appendChild(d);
-    };
-    if (store.picked === null) {
-      line('Click a PIN on the map.', false, true);
-      return;
-    }
-    const c = ds.counts[store.picked];
-    const rank = cov.rank[store.picked] + 1;
-    const matched = tags.filter((_, i) => (mask[store.picked as number] & (1 << i)) !== 0).map((t) => t.label);
-    const n = oneIn(c, ds.total);
-    line(`PIN ${pad(store.picked)}`, true);
-    line(describeLift(liftOf(store.picked)));
-    line(`rank #${fmtInt(rank)} of ${fmtInt(nPins)} · top ${fmtPct(rank / nPins)} of PINs`);
-    line(matched.length > 0 ? `tags: ${matched.join(', ')}` : 'tags: none');
-    line(`${fmtInt(c)} occurrences${n === null ? '' : ` · 1 in ${fmtInt(Math.round(+n.toPrecision(3)))} of all`}`, false, true);
   }
 
   /** Clicking a PIN selects it; clicking it again (or another PIN) deselects / replaces it. */
@@ -210,24 +139,6 @@ async function main() {
     const [x, y] = rawCell(px, py);
     return [Math.min(store.frame.gridW - 1, Math.max(0, x)), Math.min(store.frame.gridH - 1, Math.max(0, y))];
   };
-  /** Small label next to the cursor: PIN and rank. Hidden while panning or dragging a rectangle. */
-  function showTip(cell: [number, number] | null, px: number, py: number) {
-    if (!cell || store.drag !== null || isMoving(store)) {
-      tipEl.style.display = 'none';
-      return;
-    }
-    const pin = store.proj().toPin(cell[0], cell[1]);
-    tipEl.textContent = `${pad(pin)} · #${fmtInt(cov.rank[pin] + 1)}`;
-    tipEl.style.display = 'block';
-    const gap = 14;
-    const cx = store.plot.left + px; // the canvas fills its container, so canvas and container coordinates agree
-    const cy = store.plot.top + py;
-    const w = tipEl.offsetWidth;
-    const h = tipEl.offsetHeight;
-    const x = cx + gap + w > store.plot.outerW ? cx - gap - w : cx + gap; // flip at the right and bottom edges
-    const y = cy + gap + h > store.plot.outerH ? cy - gap - h : cy + gap;
-    tipEl.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
-  }
   function updateHover(px: number, py: number) {
     store.hover = cellAt(px, py);
     if (store.hover) showHover(store.hover[0], store.hover[1]);
