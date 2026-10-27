@@ -15,15 +15,11 @@ import {
 } from './core/coverage';
 import { fit, panBy, toCell, toScreen, zoomAt, type Frame, type Viewport } from './core/viewport';
 import { drawAxes, plotRect, type PlotRect } from './app/axes';
+import { getElements } from './app/dom';
 import { installHints } from './app/hints';
 import { loadDataset } from './app/load';
 import { readState, writeState, type ViewState } from './app/state';
 
-const $ = <T extends HTMLElement>(id: string): T => {
-  const el = document.getElementById(id);
-  if (!el) throw new Error(`index.html has no element #${id}`);
-  return el as T;
-};
 const fmtInt = (x: number) => x.toLocaleString('en-US');
 const fmtPct = (x: number) => (x * 100).toFixed(x < 0.001 ? 4 : 2) + '%';
 const HOVER_HINT = 'Hover over the map.';
@@ -48,29 +44,13 @@ async function main() {
   const { minCount, maxCount } = ds;
   const avgCount = ds.total / nPins; // occurrences of an average PIN: the reference (1×) of every relative measure
 
-  const canvas = $<HTMLCanvasElement>('map');
+  const {
+    canvas, legendCanvas, stageEl, srcEl, hoverEl, tipEl, selEl, pickEl, projEl, cmapEl, gammaEl, gammaOut, clipEl, clipOut, tagsEl,
+    popN, popRange, popOut, resetEl, clearEl, legendCapEl, legendTicksEl, mkHoverEl, mkPickEl,
+    scaleRadios, dirRadios, popPresets,
+  } = getElements();
   const ctx = canvas.getContext('2d')!;
-  const legendCanvas = $<HTMLCanvasElement>('legend');
   const legendCtx = legendCanvas.getContext('2d')!;
-  const hoverEl = $<HTMLDivElement>('hover');
-  const tipEl = $<HTMLDivElement>('tip');
-  const selEl = $<HTMLDivElement>('sel');
-  const pickEl = $<HTMLDivElement>('pick');
-  const projEl = $<HTMLSelectElement>('proj');
-  const cmapEl = $<HTMLSelectElement>('cmap');
-  const gammaEl = $<HTMLInputElement>('gamma');
-  const gammaOut = $<HTMLSpanElement>('gammaOut');
-  const clipEl = $<HTMLInputElement>('clip');
-  const clipOut = $<HTMLSpanElement>('clipOut');
-  const tagsEl = $<HTMLDivElement>('tags');
-  const popN = $<HTMLInputElement>('popN');
-  const popRange = $<HTMLInputElement>('popRange');
-  const popOut = $<HTMLDivElement>('popOut');
-  const resetEl = $<HTMLButtonElement>('reset');
-  const legendCapEl = $<HTMLDivElement>('legendCap');
-  const legendTicksEl = $<HTMLDivElement>('legendTicks');
-  const mkHoverEl = $<HTMLDivElement>('mkHover');
-  const mkPickEl = $<HTMLDivElement>('mkPick');
 
   const defaults: ViewState = { p: projIds[0], s: 'log', g: 0.5, t: 0, m: 'viridis', c: 99, n: 0, d: 'top' };
   const state = readState(location.hash, defaults, projIds, tagIds);
@@ -99,7 +79,7 @@ async function main() {
   const off = document.createElement('canvas');
   const offCtx = off.getContext('2d')!;
 
-  $('src').textContent =
+  srcEl.textContent =
       ds.source === 'hibp'
           ? `HIBP · ${fmtInt(ds.total)} occurrences`
           : 'DEMO – synthetic data (run `npm run data` to fetch HIBP)';
@@ -109,7 +89,7 @@ async function main() {
   projEl.value = state.p;
   for (const id of COLORMAP_IDS) cmapEl.add(new Option(COLORMAPS[id].label, id));
   cmapEl.value = state.m;
-  document.querySelectorAll<HTMLInputElement>('input[name=s]').forEach((r) => (r.checked = r.value === state.s));
+  scaleRadios.forEach((r) => (r.checked = r.value === state.s));
   gammaEl.value = String(state.g);
   clipEl.value = String(state.c);
   popN.max = String(nPins);
@@ -158,7 +138,7 @@ async function main() {
   function syncPopularityControls(skipNumberField: boolean) {
     if (!skipNumberField) popN.value = String(state.n);
     popRange.value = String(state.n);
-    document.querySelectorAll<HTMLInputElement>('input[name=d]').forEach((r) => (r.checked = r.value === state.d));
+    dirRadios.forEach((r) => (r.checked = r.value === state.d));
   }
 
   function showPopularity() {
@@ -482,7 +462,7 @@ async function main() {
     state.m = cmapEl.value as ColormapId;
     commit();
   });
-  document.querySelectorAll<HTMLInputElement>('input[name=s]').forEach((r) =>
+  scaleRadios.forEach((r) =>
       r.addEventListener('change', () => {
         state.s = r.value as ScaleKind;
         syncControls();
@@ -505,7 +485,7 @@ async function main() {
     state.t ^= 1 << Number(input.dataset.bit);
     commit();
   });
-  document.querySelectorAll<HTMLInputElement>('input[name=d]').forEach((r) =>
+  dirRadios.forEach((r) =>
       r.addEventListener('change', () => {
         state.d = r.value as PopularityDirection;
         applyPopularity();
@@ -520,13 +500,13 @@ async function main() {
     state.n = Number.isFinite(v) ? v : 0;
     applyPopularity(true);
   });
-  document.querySelectorAll<HTMLButtonElement>('button[data-n]').forEach((b) =>
+  popPresets.forEach((b) =>
       b.addEventListener('click', () => {
         state.n = Number(b.dataset.n);
         applyPopularity();
       }),
   );
-  $('clear').addEventListener('click', () => {
+  clearEl.addEventListener('click', () => {
     selection = new Set();
     showSelection();
     buildImage();
@@ -683,7 +663,7 @@ async function main() {
   layout();
   showSelection();
   showPicked();
-  new ResizeObserver(() => layout(false)).observe($('stage'));
+  new ResizeObserver(() => layout(false)).observe(stageEl);
   window.addEventListener('resize', () => layout(false)); // page zoom changes the pixel ratio without resizing the stage
 }
 
