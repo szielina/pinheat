@@ -16,12 +16,11 @@ import {
 import { fit, panBy, toCell, toScreen, zoomAt, type Frame, type Viewport } from './core/viewport';
 import { drawAxes, plotRect, type PlotRect } from './app/axes';
 import { getElements } from './app/dom';
+import { fmtInt, fmtPct } from './app/format';
 import { installHints } from './app/hints';
 import { loadDataset } from './app/load';
 import { readState, writeState, type ViewState } from './app/state';
 
-const fmtInt = (x: number) => x.toLocaleString('en-US');
-const fmtPct = (x: number) => (x * 100).toFixed(x < 0.001 ? 4 : 2) + '%';
 const HOVER_HINT = 'Hover over the map.';
 const DIM_ALPHA = 40;
 const CLICK_SLOP = 5; // pointer travel (CSS px) below which a mouse press counts as a click, not a pan
