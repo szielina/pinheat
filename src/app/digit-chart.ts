@@ -2,6 +2,7 @@ import { digitCount, digitFrequency, digitShare, type DigitFrequency } from '../
 import type { Data } from './data';
 import type { Elements } from './dom';
 import { fmtInt, fmtPct } from './format';
+import { radioGroup } from './radio-group';
 import type { Store } from './store';
 import { svgEl } from './svg';
 import type { Visible } from './visible';
@@ -59,24 +60,6 @@ export function installDigitChart({ data, store, el, visible }: DigitChartDeps):
   function recount() {
     frequency = digitFrequency(data.n, visible.current(), byOccurrences ? data.ds.counts : undefined);
     draw();
-  }
-
-  function radioGroup(name: string, label: string, options: Array<[value: string, text: string, hint: string]>, checked: string, onPick: (value: string) => void) {
-    const group = document.createElement('div');
-    group.append(`${label} `);
-    for (const [value, text, hint] of options) {
-      const input = document.createElement('input');
-      input.type = 'radio';
-      input.name = name;
-      input.value = value;
-      input.checked = value === checked;
-      input.addEventListener('change', () => onPick(value));
-      const row = document.createElement('label');
-      row.title = hint;
-      row.append(input, ` ${text}`);
-      group.append(row);
-    }
-    return group;
   }
 
   function buildOptions() {
