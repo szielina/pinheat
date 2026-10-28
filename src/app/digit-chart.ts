@@ -27,7 +27,7 @@ export interface DigitChartDeps {
  * every PIN once, and pool the positions or show them side by side.
  */
 export function installDigitChart({ data, store, el, visible }: DigitChartDeps): void {
-  const { digitsCapEl, digitsOptsEl, digitsLegendEl, digitsChartEl } = el;
+  const { digitsCapEl, digitsOptsEl, digitsNoteEl, digitsLegendEl, digitsChartEl } = el;
   let byOccurrences = true;
   let perPosition = false;
   let frequency: DigitFrequency | null = null;
@@ -37,10 +37,23 @@ export function installDigitChart({ data, store, el, visible }: DigitChartDeps):
   buildLegend();
 
   /** Says which PINs the chart is about. */
-  function scope(): string {
+  function scope(f: DigitFrequency): string {
     const filtered = store.view.t !== 0 || store.pop !== null;
     if (store.selection.size > 0) return filtered ? 'Selection within the filters' : 'Selection';
-    return filtered ? 'Filtered PINs' : 'All PINs';
+    return filtered && f.pins < data.nPins ? 'Filtered PINs' : 'All PINs'; // a filter that leaves every PIN is no filter
+  }
+
+  /** One sentence on what the bars mean under the current switches. */
+  function note(f: DigitFrequency): string {
+    const count = byOccurrences
+      ? 'Every PIN counts as often as it occurs in the data, so the bars show which digits people actually pick.'
+      : 'Every PIN counts once, so the bars show what the set is made of.';
+    const where = perPosition ? ' One bar per position of the PIN.' : ' A digit counts wherever it stands in the PIN.';
+    const flat =
+      !byOccurrences && f.pins === data.nPins
+        ? ' The full set is flat at 10% by construction: narrow it with tags, popularity or a selection to see what is typical of it.'
+        : '';
+    return count + where + flat;
   }
 
   function recount() {
@@ -73,8 +86,8 @@ export function installDigitChart({ data, store, el, visible }: DigitChartDeps):
         'digitsCount',
         'Count',
         [
-          ['occ', 'occurrences', 'Every PIN counts as often as it occurs in the data: which digits people actually pick.'],
-          ['pin', 'PINs', 'Every PIN counts once: what the set is made of, whatever its popularity.'],
+          ['occ', 'by occurrences', 'Every PIN counts as often as it occurs in the data: which digits people actually pick.'],
+          ['pin', 'by PIN', 'Every PIN counts once: what the set is made of, whatever its popularity.'],
         ],
         'occ',
         (v) => {
@@ -123,7 +136,8 @@ export function installDigitChart({ data, store, el, visible }: DigitChartDeps):
     if (!frequency || width <= 0) return;
     const f = frequency;
     digitsCapEl.textContent =
-      `${scope()}: ${fmtInt(f.pins)} of ${fmtInt(data.nPins)} PINs` + (byOccurrences ? ` · ${fmtInt(f.weight)} occurrences` : '');
+      `${scope(f)}: ${fmtInt(f.pins)} of ${fmtInt(data.nPins)} PINs` + (byOccurrences ? ` · ${fmtInt(f.weight)} occurrences` : '');
+    digitsNoteEl.textContent = note(f);
     if (f.pins === 0 || f.weight === 0) {
       digitsChartEl.textContent = 'No PINs to show: the filters leave nothing.';
       return;
