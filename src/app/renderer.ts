@@ -2,12 +2,12 @@ import { lut } from '../core/colormap';
 import { valueAtPercentile } from '../core/coverage';
 import { legendTicks } from '../core/legend';
 import { makeScale, type Scale } from '../core/scale';
-import { visibleSet } from '../core/visibility';
 import { fit, panBy, toScreen } from '../core/viewport';
 import { drawAxes, plotRect } from './axes';
 import type { Data } from './data';
 import type { Elements } from './dom';
 import { isMoving, type Store } from './store';
+import type { Visible } from './visible';
 
 const DIM_ALPHA = 40;
 
@@ -23,8 +23,8 @@ export interface Renderer {
   layout(refit?: boolean): void;
 }
 
-export function createRenderer(data: Data, store: Store, el: Elements): Renderer {
-  const { ds, cov, mask, nPins, avgCount } = data;
+export function createRenderer(data: Data, store: Store, el: Elements, shown: Visible): Renderer {
+  const { ds, cov, nPins, avgCount } = data;
   const { minCount, maxCount } = ds;
   const { canvas, legendCanvas, legendCapEl, legendTicksEl, mkHoverEl, mkPickEl } = el;
   const ctx = canvas.getContext('2d')!;
@@ -48,12 +48,7 @@ export function createRenderer(data: Data, store: Store, el: Elements): Renderer
     scale = makeScale(ds.counts, { kind: store.view.s, gamma: store.view.g, clipMax: clipMax() });
     const norm = scale.norm;
     const colors = lut(store.view.m);
-    const visible = visibleSet(nPins, {
-      tagMask: mask,
-      enabledTags: store.view.t,
-      popularity: store.pop ? store.pop.member : null,
-      selection: store.selection,
-    });
+    const visible = shown.recompute();
     for (let pin = 0; pin < nPins; pin++) {
       const [x, y] = p.toXY(pin);
       const i = Math.min(255, Math.max(0, Math.round(norm(pin) * 255))) * 3;

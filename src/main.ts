@@ -10,6 +10,7 @@ import { createPanels } from './app/panels';
 import { installPointer } from './app/pointer';
 import { createRenderer } from './app/renderer';
 import { createStore } from './app/store';
+import { createVisible } from './app/visible';
 
 async function main() {
   const N = 4;
@@ -18,7 +19,8 @@ async function main() {
   const el = getElements();
   const store = createStore(data);
 
-  const renderer = createRenderer(data, store, el);
+  const visible = createVisible(data, store);
+  const renderer = createRenderer(data, store, el, visible);
   const panels = createPanels(data, store, el);
   const geometry = createGeometry(el.canvas, store);
   const host = createPointerHost(store, el, geometry, panels, renderer);
