@@ -1,6 +1,7 @@
 import './style.css';
 import { installControls } from './app/controls';
 import { createData } from './app/data';
+import { installDigitChart } from './app/digit-chart';
 import { getElements } from './app/dom';
 import { createGeometry } from './app/geometry';
 import { installHints } from './app/hints';
@@ -28,6 +29,7 @@ async function main() {
   panels.showSource();
   const controls = installControls({ data, store, el, panels, renderer, selectionChanged: host.selectionChanged });
   installPointer(el.canvas, store, geometry, host);
+  installDigitChart({ data, store, el, visible });
 
   controls.refresh();
   renderer.buildImage();

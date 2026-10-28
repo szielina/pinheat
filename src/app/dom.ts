@@ -31,6 +31,9 @@ export interface Elements {
   legendTicksEl: HTMLDivElement;
   mkHoverEl: HTMLDivElement;
   mkPickEl: HTMLDivElement;
+  digitsCapEl: HTMLDivElement;
+  digitsLegendEl: HTMLDivElement;
+  digitsChartEl: HTMLDivElement;
   /** Radio buttons of the colour scale and of the popularity direction, and the preset buttons of the popularity filter. */
   scaleRadios: NodeListOf<HTMLInputElement>;
   dirRadios: NodeListOf<HTMLInputElement>;
@@ -63,6 +66,9 @@ export function getElements(): Elements {
     legendTicksEl: byId('legendTicks'),
     mkHoverEl: byId('mkHover'),
     mkPickEl: byId('mkPick'),
+    digitsCapEl: byId('digitsCap'),
+    digitsLegendEl: byId('digitsLegend'),
+    digitsChartEl: byId('digitsChart'),
     scaleRadios: document.querySelectorAll<HTMLInputElement>('input[name=s]'),
     dirRadios: document.querySelectorAll<HTMLInputElement>('input[name=d]'),
     popPresets: document.querySelectorAll<HTMLButtonElement>('button[data-n]'),
