@@ -1,3 +1,4 @@
+import './style.css';
 import { installControls } from './app/controls';
 import { createData } from './app/data';
 import { getElements } from './app/dom';
