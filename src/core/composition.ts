@@ -1,31 +1,38 @@
-/** What a set of PINs is made of: how many of its PINs have digit d at position p. Counts PINs, not occurrences. */
-export interface DigitComposition {
-  /** Digits per PIN. */
-  digits: number;
+/** How often each digit 0-9 occurs in a set of PINs, wherever in the PIN it stands. */
+export interface DigitFrequency {
   /** PINs in the set. */
-  size: number;
-  /** `counts[pos * 10 + d]` = PINs of the set with digit `d` at position `pos` (0 = leftmost). Every position sums to `size`. */
-  counts: Uint32Array;
+  pins: number;
+  /** Digit slots counted: the weighted number of PINs times digits per PIN. */
+  total: number;
+  /** `counts[d]` = weighted number of digits equal to `d`. Sums to `total`. */
+  counts: Float64Array;
 }
 
-/** Composition of the PINs flagged in `member` (1 = in the set; index = the PIN, as in `Dataset.counts`). */
-export function digitComposition(digits: number, member: ArrayLike<number>): DigitComposition {
-  const counts = new Uint32Array(digits * 10);
-  let size = 0;
+/**
+ * Digit frequency of the PINs flagged in `member` (1 = in the set; index = the PIN).
+ * Each PIN counts `weights[pin]` times, so with the occurrence counts as weights the result says which digits
+ * people actually pick; with weights of 1 it says what the set is made of.
+ */
+export function digitFrequency(digits: number, member: ArrayLike<number>, weights: ArrayLike<number>): DigitFrequency {
+  const counts = new Float64Array(10);
+  let pins = 0;
+  let total = 0;
   for (let pin = 0; pin < member.length; pin++) {
     if (member[pin] !== 1) continue;
-    size++;
+    pins++;
+    const w = weights[pin];
+    total += w * digits;
     let rest = pin;
-    for (let pos = digits - 1; pos >= 0; pos--) {
+    for (let pos = 0; pos < digits; pos++) {
       const d = rest % 10;
-      counts[pos * 10 + d]++;
+      counts[d] += w;
       rest = (rest - d) / 10;
     }
   }
-  return { digits, size, counts };
+  return { pins, total, counts };
 }
 
-/** Share of the set (0–1) with digit `d` at position `pos`; 0 for an empty set. */
-export function digitShare(c: DigitComposition, pos: number, d: number): number {
-  return c.size > 0 ? c.counts[pos * 10 + d] / c.size : 0;
+/** Share of all counted digits (0-1) that equal `d`; 0 when nothing was counted. */
+export function digitShare(f: DigitFrequency, d: number): number {
+  return f.total > 0 ? f.counts[d] / f.total : 0;
 }

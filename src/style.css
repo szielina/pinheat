@@ -49,4 +49,4 @@ footer { grid-column:1 / -1; color:var(--muted); font-size:12px; border-top:1px 
 .chart .grid { stroke:var(--line); stroke-width:1; }
 .chart .uniform { stroke:var(--fg); stroke-width:1.5; stroke-dasharray:5 4; }
 .chart .tick { fill:var(--muted); font:11px system-ui, sans-serif; }
-#digitsChart { min-height:220px; }
+#digitsChart { min-height:200px; }
