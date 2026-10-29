@@ -22,12 +22,15 @@ not in new data but in how those 10,000 numbers are sliced and labelled.
 - **Scales.** Linear, gamma and logarithmic show the counts; rank equalises the
   colours so every shade holds the same number of PINs. A few PINs (1234, 1111,
   0000) are so common that they wash out everything else on a linear scale.
+  "vs row/column" takes out what the PIN's row and column of the map predict and
+  colours the rest (1× = as expected), so diagonals and blocks that the rows and
+  columns do not explain stand out; it depends on the projection.
 - **Dimmed cells** are filtered out by a tag, by popularity or by a selection.
 
 ## Features
 
 - Three projections of a 4-digit PIN: AB × CD, AC × BD, AD × BC
-- Four colour scales, four palettes (two of them colour-blind friendly), clipping
+- Five colour scales, four palettes (two of them colour-blind friendly), clipping
   at a percentile
 - A legend that follows the scale, with markers for the PIN under the cursor and
   the clicked PIN
@@ -35,9 +38,12 @@ not in new data but in how those 10,000 numbers are sliced and labelled.
 - Click a PIN for its stats: how it compares with an average PIN, its rank, its
   tags
 - Tags for patterns (dates, years, repeats, sequences, palindromes) and for shapes
-  on a numeric keypad (squares, lines, diamonds), each with the share of all
+  on a numeric keypad (squares, lines, diamonds, echoes), each with the share of all
   occurrences it explains and how much more common than chance that is
 - "By popularity": highlight the N most (or least) common PINs
+- Charts under the map for the PINs that are shown: how often each digit occurs
+  (by occurrences or by PIN, pooled or per position) and totals per row and column
+  of the current projection (linear or logarithmic)
 - Rectangle selection (Shift + drag) that survives a change of projection
 - View settings are kept in the URL hash, so a view can be shared by link
 - Works on touch screens (drag, pinch, tap)
