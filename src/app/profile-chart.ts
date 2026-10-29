@@ -1,7 +1,7 @@
 import { axisLabel, axisTitle, tickStep } from '../core/axis';
 import { barScale } from '../core/barscale';
 import { fmtX } from '../core/measure';
-import { axisProfile, type Profile } from '../core/profile';
+import { axisProfile, median, type Profile } from '../core/profile';
 import type { Data } from './data';
 import type { Elements } from './dom';
 import { fmtCompact, fmtInt } from './format';
@@ -16,6 +16,9 @@ const MARGIN = { top: 8, right: 6, bottom: 22, left: 46 };
 const MIN_TICK_PX = 14; // closest two y labels may be
 const MIN_LABEL_PX = 38; // closest two x labels may be
 
+/** What a bar shows: occurrences summed, PINs counted, or the median occurrences of a PIN. */
+type Measure = 'occ' | 'pin' | 'typ';
+
 export interface ProfileChartDeps {
   data: Data;
   store: Store;
@@ -24,13 +27,14 @@ export interface ProfileChartDeps {
 }
 
 /**
- * Two bar charts under the digit chart: the shown set summed by column (x) and by row (y) of the current projection,
- * one bar per axis value (00-99 for AB x CD). Count: PINs or occurrences; scale: linear or logarithmic. The shown
- * set is the selection when there is one, else whatever the filters leave (see `Visible`).
+ * Two bar charts under the digit chart: the shown set by column (x) and by row (y) of the current projection,
+ * one bar per axis value (00-99 for AB x CD). Show: occurrences summed, PINs counted, or the typical PIN (the median
+ * occurrences of a PIN in that row or column, so one giant such as 1234 does not take over the scale); scale: linear
+ * or logarithmic. The shown set is the selection when there is one, else whatever the filters leave (see `Visible`).
  */
 export function installProfileCharts({ data, store, el, visible }: ProfileChartDeps): void {
   const { profOptsEl, profNoteEl, profLegendEl, profChartsEl } = el;
-  let byOccurrences = true;
+  let measure: Measure = 'occ';
   let logScale = false;
   let profile: Profile | null = null;
   let pinsInSet = 0;
@@ -46,47 +50,50 @@ export function installProfileCharts({ data, store, el, visible }: ProfileChartD
   });
 
   profOptsEl.append(
-    radioGroup(
-      'profCount',
-      'Count',
-      [
-        ['occ', 'occurrences', 'Every PIN counts as often as it occurs in the data: where the people go.'],
-        ['pin', 'PINs', 'Every PIN counts once: how many of the shown PINs fall in each row and column.'],
-      ],
-      'occ',
-      (v) => {
-        byOccurrences = v === 'occ';
-        draw();
-      },
-    ),
-    radioGroup(
-      'profScale',
-      'Scale',
-      [
-        ['lin', 'linear', 'Bar height proportional to the value.'],
-        ['log', 'logarithmic', 'Bar height follows the logarithm of the value: small rows and columns stay visible next to the big ones.'],
-      ],
-      'lin',
-      (v) => {
-        logScale = v === 'log';
-        draw();
-      },
-    ),
+      radioGroup(
+          'profCount',
+          'Show',
+          [
+            ['occ', 'occurrences', 'Every PIN counts as often as it occurs in the data: where the people go.'],
+            ['pin', 'PINs', 'Every PIN counts once: how many of the shown PINs fall in each row and column.'],
+            ['typ', 'typical PIN (median)', 'The middle PIN of each row and column, by occurrences: one very common PIN does not make a tall bar, only many raised PINs do.'],
+          ],
+          'occ',
+          (v) => {
+            measure = v as Measure;
+            draw();
+          },
+      ),
+      radioGroup(
+          'profScale',
+          'Scale',
+          [
+            ['lin', 'linear', 'Bar height proportional to the value.'],
+            ['log', 'logarithmic', 'Bar height follows the logarithm of the value: small rows and columns stay visible next to the big ones.'],
+          ],
+          'lin',
+          (v) => {
+            logScale = v === 'log';
+            draw();
+          },
+      ),
   );
   const dash = document.createElement('i');
   dash.className = 'dash';
   const ref = document.createElement('span');
-  ref.append(dash, 'average of a row or column');
   profLegendEl.append(ref);
 
   function note(): string {
-    const what = byOccurrences
-      ? 'Total occurrences of the shown PINs in each column and row of the map.'
-      : 'How many of the shown PINs fall in each column and row of the map.';
+    const what =
+        measure === 'occ'
+            ? 'Total occurrences of the shown PINs in each column and row of the map.'
+            : measure === 'pin'
+                ? 'How many of the shown PINs fall in each column and row of the map.'
+                : 'Occurrences of the middle PIN among the shown PINs in each column and row of the map.';
     const flat =
-      !byOccurrences && pinsInSet === data.nPins
-        ? ' The full set has the same number of PINs in every one: narrow it with tags, popularity or a selection.'
-        : '';
+        measure === 'pin' && pinsInSet === data.nPins
+            ? ' The full set has the same number of PINs in every one: narrow it with tags, popularity or a selection.'
+            : '';
     return `${what} It follows the projection chosen above.${flat}`;
   }
 
@@ -95,8 +102,10 @@ export function installProfileCharts({ data, store, el, visible }: ProfileChartD
     for (const b of blocks) b.chart.textContent = '';
     if (!profile || width <= 0) return;
     profNoteEl.textContent = note();
+    const refName = measure === 'typ' ? 'median' : 'average';
+    ref.replaceChildren(dash, measure === 'typ' ? 'median of the bars' : 'average of a row or column');
     const projection = store.proj();
-    const unit = byOccurrences ? 'occurrences' : 'PINs';
+    const unit = measure === 'occ' ? 'occurrences' : measure === 'pin' ? 'PINs' : 'occurrences of a typical PIN';
     const geometry = {
       x: { positions: projection.xDigits, name: 'Columns (x)' },
       y: { positions: projection.yDigits, name: 'Rows (y)' },
@@ -104,18 +113,23 @@ export function installProfileCharts({ data, store, el, visible }: ProfileChartD
     for (const { axis, caption, chart } of blocks) {
       const { positions, name } = geometry[axis];
       caption.textContent = `${name} · ${axisTitle(positions, data.n)}`;
-      const values = byOccurrences ? profile[axis].occurrences : profile[axis].pins;
+      const along = profile[axis];
+      const values = measure === 'occ' ? along.occurrences : measure === 'pin' ? along.pins : along.typical;
       let max = 0;
       let sum = 0;
-      for (const v of values) {
-        max = Math.max(max, v);
-        sum += v;
+      let pins = 0;
+      for (let i = 0; i < values.length; i++) {
+        max = Math.max(max, values[i]);
+        sum += values[i];
+        pins += along.pins[i];
       }
-      if (sum === 0) {
+      if (pins === 0) {
         chart.textContent = 'No PINs to show: the filters leave nothing.';
         continue;
       }
-      const mean = sum / values.length;
+      // the dashed line: the mean of the bars, or for the typical PIN their median (rows and columns without PINs left out)
+      const reference =
+          measure === 'typ' ? median(Array.from(values).filter((_, i) => along.pins[i] > 0)) : sum / values.length;
       const scale = barScale(max, logScale);
       const plotW = width - MARGIN.left - MARGIN.right;
       const plotH = HEIGHT - MARGIN.top - MARGIN.bottom;
@@ -134,8 +148,8 @@ export function installProfileCharts({ data, store, el, visible }: ProfileChartD
         if (lastY - ty < MIN_TICK_PX) continue;
         lastY = ty;
         svg.append(
-          svgEl('line', { class: 'grid', x1: MARGIN.left, x2: MARGIN.left + plotW, y1: ty, y2: ty }),
-          svgEl('text', { class: 'tick', x: MARGIN.left - 6, y: ty + 4, 'text-anchor': 'end' }, fmtCompact(tick)),
+            svgEl('line', { class: 'grid', x1: MARGIN.left, x2: MARGIN.left + plotW, y1: ty, y2: ty }),
+            svgEl('text', { class: 'tick', x: MARGIN.left - 6, y: ty + 4, 'text-anchor': 'end' }, fmtCompact(tick)),
         );
       }
 
@@ -150,11 +164,12 @@ export function installProfileCharts({ data, store, el, visible }: ProfileChartD
         }
       }
 
-      svg.append(svgEl('line', { class: 'uniform', x1: MARGIN.left, x2: MARGIN.left + plotW, y1: y(mean), y2: y(mean) }));
+      svg.append(svgEl('line', { class: 'uniform', x1: MARGIN.left, x2: MARGIN.left + plotW, y1: y(reference), y2: y(reference) }));
 
       // transparent full-height columns on top: the whole column answers the hover, however short the bar is
       for (let i = 0; i < values.length; i++) {
-        const title = svgEl('title', {}, `${axisLabel(i, positions, data.n)}: ${fmtInt(values[i])} ${unit} · ${fmtX(values[i] / mean)} the average`);
+        const relative = reference > 0 ? ` · ${fmtX(values[i] / reference)} the ${refName}` : '';
+        const title = svgEl('title', {}, `${axisLabel(i, positions, data.n)}: ${fmtInt(values[i])} ${unit}${relative}`);
         svg.append(svgEl('rect', { x: MARGIN.left + i * colW, y: MARGIN.top, width: colW, height: plotH, fill: 'transparent' }, title));
       }
       chart.append(svg);
