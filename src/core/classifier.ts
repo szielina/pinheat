@@ -1,6 +1,7 @@
 import {
   boxOf,
   distinctCount,
+  echoKind,
   fitsIn2x2,
   isEdgeMiddle,
   keyDistance,
@@ -120,10 +121,16 @@ export function keypadTags(l: KeypadLayout): Tag[] {
         return dist !== null && dist <= 1;
       },
     },
+    {
+      // the geometry behind the AB+CD=110 diagonal of the AB x CD map; measured on the PC keypad
+      id: 'kp-echo',
+      label: 'Keypad: echo, last two keys turn or mirror the first two (3377)',
+      test: (d) => echoKind(l, d) !== null,
+    },
   ];
 }
 
-/** 6 pattern tags + 9 keypad tags = 15. Tags are addressed by bit (`1 << index`) in a Uint32Array, so up to 31 fit. */
+/** 6 pattern tags + 10 keypad tags = 16. Tags are addressed by bit (`1 << index`) in a Uint32Array, so up to 31 fit. */
 export const TAGS4_ALL: Tag[] = [...TAGS4, ...keypadTags(NUMPAD)];
 
 const MAX_TAGS = 31; // bit 31 would make `1 << 31` negative

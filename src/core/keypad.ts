@@ -62,6 +62,31 @@ export function squareKind(l: KeypadLayout, d: number[]): SquareKind | null {
   return steps[0].horizontal ? 'z' : 'n';
 }
 
+export type EchoKind = 'turn' | 'mirror' | 'diagonal';
+
+/** Where the key at (row, column) of the 3 x 3 block goes: turned by 180°, mirrored left-right, mirrored along the `/` diagonal. */
+const ECHO_MAPS: Record<EchoKind, (row: number, col: number) => [number, number]> = {
+  turn: (r, c) => [2 - r, 2 - c],
+  mirror: (r, c) => [r, 2 - c],
+  diagonal: (r, c) => [2 - c, 2 - r],
+};
+
+/**
+ * The last two keys are the first two, turned or mirrored across the 3 x 3 block (3377, 1793, 2486, 7535).
+ * Keys 1-9 only (the 0 key lies outside the block); ABAB is its own echo and does not count. Returns the first
+ * transformation that fits, otherwise null.
+ */
+export function echoKind(l: KeypadLayout, d: number[]): EchoKind | null {
+  if (d.includes(0) || (d[2] === d[0] && d[3] === d[1])) return null;
+  for (const kind of Object.keys(ECHO_MAPS) as EchoKind[]) {
+    const f = ECHO_MAPS[kind];
+    const [r3, c3] = f(...l[d[0]]);
+    const [r4, c4] = f(...l[d[1]]);
+    if (l[d[2]][0] === r3 && l[d[2]][1] === c3 && l[d[3]][0] === r4 && l[d[3]][1] === c4) return kind;
+  }
+  return null;
+}
+
 /** Keys at the middle of a side of the 3 × 3 block (2, 4, 6, 8): the corners of a diamond round 5. */
 export const isEdgeMiddle = (l: KeypadLayout, k: number): boolean => k !== 0 && (l[k][0] + l[k][1]) % 2 === 1;
 
