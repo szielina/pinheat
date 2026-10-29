@@ -36,6 +36,10 @@ export interface Elements {
   digitsNoteEl: HTMLDivElement;
   digitsLegendEl: HTMLDivElement;
   digitsChartEl: HTMLDivElement;
+  profOptsEl: HTMLDivElement;
+  profNoteEl: HTMLDivElement;
+  profLegendEl: HTMLDivElement;
+  profChartsEl: HTMLDivElement;
   /** Radio buttons of the colour scale and of the popularity direction, and the preset buttons of the popularity filter. */
   scaleRadios: NodeListOf<HTMLInputElement>;
   dirRadios: NodeListOf<HTMLInputElement>;
@@ -73,6 +77,10 @@ export function getElements(): Elements {
     digitsNoteEl: byId('digitsNote'),
     digitsLegendEl: byId('digitsLegend'),
     digitsChartEl: byId('digitsChart'),
+    profOptsEl: byId('profOpts'),
+    profNoteEl: byId('profNote'),
+    profLegendEl: byId('profLegend'),
+    profChartsEl: byId('profCharts'),
     scaleRadios: document.querySelectorAll<HTMLInputElement>('input[name=s]'),
     dirRadios: document.querySelectorAll<HTMLInputElement>('input[name=d]'),
     popPresets: document.querySelectorAll<HTMLButtonElement>('button[data-n]'),
