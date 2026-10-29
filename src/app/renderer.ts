@@ -45,7 +45,7 @@ export function createRenderer(data: Data, store: Store, el: Elements, shown: Vi
     off.width = p.width;
     off.height = p.height;
     const img = offCtx.createImageData(p.width, p.height);
-    scale = makeScale(ds.counts, { kind: store.view.s, gamma: store.view.g, clipMax: clipMax() });
+    scale = makeScale(ds.counts, { kind: store.view.s, gamma: store.view.g, clipMax: clipMax(), projection: p });
     const norm = scale.norm;
     const colors = lut(store.view.m);
     const visible = shown.recompute();
@@ -72,6 +72,8 @@ export function createRenderer(data: Data, store: Store, el: Elements, shown: Vi
         return 'Occurrences relative to an average PIN (1× = all PINs equally common). Logarithmic, from the rarest to the commonest PIN.';
       case 'rank':
         return 'Place in the ranking, not the count: every shade holds the same number of PINs.';
+      case 'adjusted':
+        return 'Occurrences against what the PIN\'s row and column predict (1× = as expected). What stands out is not explained by them alone; it depends on the projection.';
     }
   }
 

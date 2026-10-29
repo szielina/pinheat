@@ -1,5 +1,5 @@
 import { fmtX } from './measure';
-import type { ScaleKind } from './scale';
+import { adjustedPosition, type ScaleKind } from './scale';
 
 export interface LegendTick {
   /** Position along the colour bar, 0..1. */
@@ -15,8 +15,8 @@ export interface LegendInput {
   maxCount: number;
   /** Count at which linear / gamma saturate. */
   clipMax: number;
-  /** The scale's own count -> [0, 1] mapping, so ticks always agree with the map colours. */
-  atCount: (count: number) => number;
+  /** The scale's own count -> [0, 1] mapping, so ticks always agree with the map colours (not for the adjusted scale). */
+  atCount?: (count: number) => number;
 }
 
 const MIN_GAP = 0.08; // closest allowed distance between two ticks (fraction of the bar)
@@ -54,6 +54,17 @@ export function legendTicks(i: LegendInput): LegendTick[] {
       { t: 1, label: 'commonest' },
     ];
   }
+  if (i.kind === 'adjusted') {
+    return [
+      { t: adjustedPosition(0.25), label: '≤ 0.25×' },
+      { t: adjustedPosition(0.5), label: '0.5×' },
+      { t: adjustedPosition(1), label: '1× expected' },
+      { t: adjustedPosition(2), label: '2×' },
+      { t: adjustedPosition(4), label: '≥ 4×' },
+    ];
+  }
+  const atCount = i.atCount;
+  if (!atCount) throw new Error(`scale '${i.kind}' needs atCount for its legend`);
   const avg = i.avg > 0 ? i.avg : 1;
 
   if (i.kind === 'log') {
@@ -70,7 +81,7 @@ export function legendTicks(i: LegendInput): LegendTick[] {
         for (const m of [1, 2, 5]) if (within(m * 10 ** k)) values.push(m * 10 ** k);
       }
     }
-    return prune(values.map((v) => ({ t: i.atCount(v * avg), label: logLabel(v) })));
+    return prune(values.map((v) => ({ t: atCount(v * avg), label: logLabel(v) })));
   }
 
   // linear / gamma: 0 .. clip level
@@ -78,7 +89,7 @@ export function legendTicks(i: LegendInput): LegendTick[] {
   const step = niceStep(clipLift / 4);
   const ticks: LegendTick[] = [];
   for (let k = 0; k < 20 && k * step < clipLift * 0.95; k++) {
-    ticks.push({ t: i.atCount(k * step * avg), label: k === 0 ? '0' : fmtX(k * step) });
+    ticks.push({ t: atCount(k * step * avg), label: k === 0 ? '0' : fmtX(k * step) });
   }
   ticks.push({ t: 1, label: `≥ ${fmtX(clipLift)}` });
   return prune(ticks);

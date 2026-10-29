@@ -1,18 +1,33 @@
-export type ScaleKind = 'linear' | 'gamma' | 'log' | 'rank';
-export const SCALE_KINDS: ScaleKind[] = ['linear', 'gamma', 'log', 'rank'];
+import { adjustedLevels } from './adjust';
+import type { Projection } from './projection';
+
+export type ScaleKind = 'linear' | 'gamma' | 'log' | 'rank' | 'adjusted';
+export const SCALE_KINDS: ScaleKind[] = ['linear', 'gamma', 'log', 'rank', 'adjusted'];
+
+const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
+
+/** The adjusted scale spans this many octaves (factors of two) each way: from 1/4x to 4x what row and column predict. */
+export const ADJUSTED_OCTAVES = 2;
+
+/** Colour position (0..1) of a factor against what the row and column predict; 1x sits in the middle. */
+export function adjustedPosition(factor: number): number {
+  return clamp01(0.5 + Math.log2(Math.max(factor, 1e-9)) / (2 * ADJUSTED_OCTAVES));
+}
 
 export interface ScaleParams {
   kind: ScaleKind;
   gamma: number;
   /** Count at which linear / gamma saturate (a high percentile instead of the maximum). */
   clipMax: number;
+  /** The projection on screen: the adjusted scale takes out its rows and columns. */
+  projection: Projection;
 }
 
 export interface Scale {
   /** PIN -> value in [0, 1] (the colour position). */
   norm: (pin: number) => number;
-  /** Count -> value in [0, 1] by the same rule, for legend ticks. */
-  atCount: (count: number) => number;
+  /** Count -> value in [0, 1] by the same rule, for legend ticks. Absent where a PIN's colour is not a function of its count (adjusted). */
+  atCount?: (count: number) => number;
 }
 
 interface RankData {
@@ -57,8 +72,6 @@ function bound(sorted: Uint32Array, v: number, strict: boolean): number {
   return lo;
 }
 
-const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
-
 export function makeScale(counts: Uint32Array, p: ScaleParams): Scale {
   const clip = Math.max(1, p.clipMax);
   const byCount = (f: (c: number) => number): Scale => ({ norm: (pin) => f(counts[pin]), atCount: f });
@@ -79,6 +92,10 @@ export function makeScale(counts: Uint32Array, p: ScaleParams): Scale {
       const lo = Math.log1p(min);
       const span = Math.log1p(max) - lo || 1;
       return byCount((c) => clamp01((Math.log1p(c) - lo) / span));
+    }
+    case 'adjusted': {
+      const levels = adjustedLevels(counts, p.projection);
+      return { norm: (pin) => adjustedPosition(Math.exp(levels[pin])) };
     }
     case 'rank': {
       const { t, sorted } = rankData(counts);

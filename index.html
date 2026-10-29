@@ -64,6 +64,7 @@
         <label title="Linear raised to a power. Below 1 it lifts rare PINs."><input type="radio" name="s" value="gamma"> gamma</label>
         <label title="Logarithm of the count, stretched from the rarest to the commonest PIN. Shows the whole range at once."><input type="radio" name="s" value="log"> logarithmic</label>
         <label title="Colour = place in the ranking, so every shade covers the same number of PINs."><input type="radio" name="s" value="rank"> rank (equalised)</label>
+        <label title="Colour = how far a PIN is from what its row and column of the map predict (the medians of both taken out of the log counts). 1× is as expected, ¼× to 4× spans the palette. Diagonals and blocks that stand out are patterns the rows and columns do not explain. Depends on the projection."><input type="radio" name="s" value="adjusted"> vs row/column</label>
         <label title="Exponent of the gamma scale. Below 1 brightens rare PINs, above 1 darkens them.">gamma <span id="gammaOut" class="muted"></span>
           <input type="range" id="gamma" min="0.1" max="1.5" step="0.05" style="width:100%"></label>
         <label title="Linear and gamma only. PINs above this percentile of the count distribution all get the brightest colour, so a few giants such as 1234 do not wash out the rest. 99% = the top 1% of PINs saturate; 100% = no clipping.">clip at percentile <span id="clipOut" class="muted"></span>
