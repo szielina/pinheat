@@ -37,7 +37,8 @@ not in new data but in how those 10,000 numbers are sliced and labelled.
 - Zoom and pan, axes labelled with PIN patterns
 - Click a PIN for its stats: how it compares with an average PIN, its rank, its
   tags
-- Tags for patterns (dates, years, repeats, sequences, palindromes) and for shapes
+- Tags for patterns (dates, years, also with two-digit years or read backwards;
+  repeats, sequences, palindromes) and for shapes
   on a numeric keypad (squares, lines, diamonds, echoes), each with the share of all
   occurrences it explains and how much more common than chance that is
 - "By popularity": highlight the N most (or least) common PINs
