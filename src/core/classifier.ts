@@ -12,8 +12,17 @@ import {
   type SquareKind,
 } from './keypad';
 
+/** Sections of the tag list in the panel; the order here is the display order, not the bit order. */
+export const TAG_GROUPS = [
+  { id: 'dates', label: 'Dates and years' },
+  { id: 'digits', label: 'Digit patterns' },
+  { id: 'keypad', label: 'Keypad shapes' },
+] as const;
+export type TagGroup = (typeof TAG_GROUPS)[number]['id'];
+
 export interface Tag {
   id: string;
+  group: TagGroup;
   label: string;
   test(d: number[]): boolean;
   /**
@@ -43,17 +52,20 @@ const isMonthYear = (d: number[]) => isMonth(d[0], d[1]);
 export const TAGS4: Tag[] = [
   {
     id: 'date',
+    group: 'dates',
     label: 'Date (DDMM / MMDD)',
     test: isDate,
   },
   {
     id: 'year',
+    group: 'dates',
     label: 'Year 1900–2029',
     test: isYear,
     key: (d) => d[0] * 1000 + d[1] * 100 + d[2] * 10 + d[3],
   },
   {
     id: 'repeat',
+    group: 'digits',
     label: 'Repeats (AAAA, ABAB, AABB)',
     test: (d) =>
       (d[0] === d[1] && d[1] === d[2] && d[2] === d[3]) ||
@@ -62,11 +74,13 @@ export const TAGS4: Tag[] = [
   },
   {
     id: 'seq',
+    group: 'digits',
     label: 'Sequence (1234, 4321, 7890)',
     test: (d) => [1, 9].some((step) => d.every((v, i) => i === 0 || (v - d[i - 1] + 10) % 10 === step)),
   },
   {
     id: 'keypad',
+    group: 'keypad',
     label: 'Keypad line (2580)',
     test: (d) => {
       const s = d.join('');
@@ -75,6 +89,7 @@ export const TAGS4: Tag[] = [
   },
   {
     id: 'palindrome',
+    group: 'digits',
     label: 'Palindrome (ABBA)',
     test: (d) => d[0] === d[3] && d[1] === d[2],
   },
@@ -94,6 +109,7 @@ const SQUARE_LABEL: Record<SquareKind, string> = {
 export function keypadTags(l: KeypadLayout): Tag[] {
   const squares = (Object.keys(SQUARE_LABEL) as SquareKind[]).map<Tag>((kind) => ({
     id: `kp-${kind}`,
+    group: 'keypad',
     label: SQUARE_LABEL[kind],
     test: (d) => squareKind(l, d) === kind,
   }));
@@ -105,11 +121,13 @@ export function keypadTags(l: KeypadLayout): Tag[] {
     ...squares,
     {
       id: 'kp-compact',
+      group: 'keypad',
       label: 'Keypad: 3 keys in a 2×2 block (8985)',
       test: (d) => distinctCount(d) === 3 && fitsIn2x2(l, d),
     },
     {
       id: 'kp-line',
+      group: 'keypad',
       label: 'Keypad: 3 keys in a row or column (8789)',
       test: (d) => {
         const b = boxOf(l, d);
@@ -118,17 +136,20 @@ export function keypadTags(l: KeypadLayout): Tag[] {
     },
     {
       id: 'kp-diamond',
+      group: 'keypad',
       label: 'Keypad: 3–4 of the keys 2, 4, 6, 8 (4268)',
       test: (d) => distinctCount(d) >= 3 && d.every((k) => isEdgeMiddle(l, k)),
     },
     {
       // AABB / ABAB; keys two or more steps apart. Pairs 1.5 apart (only 0 and 3 on a PC keypad) belong to neither tag.
       id: 'kp-far',
+      group: 'keypad',
       label: 'Keypad: AABB / ABAB with far keys (1199)',
       test: (d) => (pairDistance(d) ?? 0) >= 2,
     },
     {
       id: 'kp-near',
+      group: 'keypad',
       label: 'Keypad: AABB / ABAB with neighbouring keys (1122)',
       test: (d) => {
         const dist = pairDistance(d);
@@ -138,6 +159,7 @@ export function keypadTags(l: KeypadLayout): Tag[] {
     {
       // the geometry behind the AB+CD=110 diagonal of the AB x CD map; measured on the PC keypad
       id: 'kp-echo',
+      group: 'keypad',
       label: 'Keypad: echo, last two keys turn or mirror the first two (3377)',
       test: (d) => echoKind(l, d) !== null,
     },
@@ -153,35 +175,41 @@ export function keypadTags(l: KeypadLayout): Tag[] {
 export const TAGS4_DATES: Tag[] = [
   {
     id: 'yymm',
+    group: 'dates',
     label: 'Year + month, YYMM (7608 = Aug 1976)',
     test: isYearMonth,
     key: (d) => pair(d[0], d[1]),
   },
   {
     id: 'mmyy',
+    group: 'dates',
     label: 'Month + year, MMYY (0876 = Aug 1976)',
     test: isMonthYear,
     key: (d) => pair(d[2], d[3]),
   },
   {
     id: 'date-rev',
+    group: 'dates',
     label: 'Date backwards (8021 = 1208)',
     test: (d) => isDate(reversed(d)),
   },
   {
     id: 'year-rev',
+    group: 'dates',
     label: 'Year backwards (6202 = 2026)',
     test: (d) => isYear(reversed(d)),
     key: (d) => pair(d[3], d[2]) * 100 + pair(d[1], d[0]),
   },
   {
     id: 'yymm-rev',
+    group: 'dates',
     label: 'YYMM backwards (8067 = Aug 1976)',
     test: (d) => isYearMonth(reversed(d)),
     key: (d) => pair(d[3], d[2]),
   },
   {
     id: 'mmyy-rev',
+    group: 'dates',
     label: 'MMYY backwards (6780 = Aug 1976)',
     test: (d) => isMonthYear(reversed(d)),
     key: (d) => pair(d[1], d[0]),
