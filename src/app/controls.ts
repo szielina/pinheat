@@ -54,7 +54,7 @@ export function installControls({ data, store, el, panels, renderer, selectionCh
   const tagStats = (share: number, size: number) => `${fmtPct(share)} · ${size > 0 ? fmtX(enrichment(share, size, nPins)) : '–'}`;
   const tagSize = tags.map((_, i) => mask.reduce((n, m) => n + ((m >> i) & 1), 0));
   const restSize = mask.reduce((n, m) => n + (m === 0 ? 1 : 0), 0);
-  buildTagList(
+  const tagList = buildTagList(
       tagsEl,
       tags,
       store.view.t,
@@ -130,6 +130,7 @@ export function installControls({ data, store, el, panels, renderer, selectionCh
     const input = e.target as HTMLInputElement;
     if (input.dataset.bit === undefined) return;
     store.view.t ^= 1 << Number(input.dataset.bit);
+    tagList.showTicked(store.view.t);
     commit();
   });
   dirRadios.forEach((r) =>

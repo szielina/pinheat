@@ -55,3 +55,11 @@ footer { grid-column:1 / -1; color:var(--muted); font-size:12px; border-top:1px 
 .chart .uniform { stroke:var(--fg); stroke-width:1.5; stroke-dasharray:5 4; }
 .chart .tick { fill:var(--muted); font:11px system-ui, sans-serif; }
 #digitsChart { min-height:200px; }
+
+/* tag list: one collapsible section per group */
+.tag-group > summary { cursor:pointer; list-style:none; user-select:none; color:var(--muted); padding:2px 0; }
+.tag-group > summary::-webkit-details-marker { display:none; }
+.tag-group > summary::before { content:'▸'; display:inline-block; width:14px; font-size:11px; transition:transform .12s; }
+.tag-group[open] > summary::before { transform:rotate(90deg); }
+.tag-group > summary:hover { color:var(--fg); }
+.tag-group + .tag-group, #tags > .muted:last-child { margin-top:6px; }
