@@ -11,6 +11,7 @@ import type { Panels } from './panels';
 import type { Renderer } from './renderer';
 import { writeState } from './state';
 import type { Store } from './store';
+import { buildTagList } from './tag-list';
 
 export interface ControlsDeps {
   data: Data;
@@ -53,22 +54,13 @@ export function installControls({ data, store, el, panels, renderer, selectionCh
   const tagStats = (share: number, size: number) => `${fmtPct(share)} · ${size > 0 ? fmtX(enrichment(share, size, nPins)) : '–'}`;
   const tagSize = tags.map((_, i) => mask.reduce((n, m) => n + ((m >> i) & 1), 0));
   const restSize = mask.reduce((n, m) => n + (m === 0 ? 1 : 0), 0);
-  tags.forEach((t, i) => {
-    const row = document.createElement('label');
-    const box = document.createElement('input');
-    box.type = 'checkbox';
-    box.dataset.bit = String(i);
-    box.checked = ((store.view.t >> i) & 1) === 1;
-    const stats = document.createElement('span');
-    stats.className = 'muted';
-    stats.textContent = tagStats(tagShare[i], tagSize[i]);
-    row.append(box, ` ${t.label} `, stats); // text nodes only: a tag label never reaches innerHTML
-    tagsEl.appendChild(row);
-  });
-  const rest = document.createElement('div');
-  rest.className = 'muted';
-  rest.textContent = `Remainder (no tag): ${tagStats(restShare, restSize)} · tag shares may overlap`;
-  tagsEl.appendChild(rest);
+  buildTagList(
+      tagsEl,
+      tags,
+      store.view.t,
+      tags.map((_, i) => tagStats(tagShare[i], tagSize[i])),
+      `Remainder (no tag): ${tagStats(restShare, restSize)} · tag shares may overlap`,
+  );
 
   /** Enables only the sliders relevant to the chosen scale. */
   function syncControls() {
