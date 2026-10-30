@@ -27,6 +27,7 @@ const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 const validDayMonth = (day: number, month: number) =>
   month >= 1 && month <= 12 && day >= 1 && day <= DAYS_IN_MONTH[month - 1];
 const pair = (a: number, b: number) => a * 10 + b;
+const reversed = (d: number[]) => [d[3], d[2], d[1], d[0]];
 
 const isDate = (d: number[]) => validDayMonth(pair(d[0], d[1]), pair(d[2], d[3])) || validDayMonth(pair(d[2], d[3]), pair(d[0], d[1]));
 const isYear = (d: number[]) => {
@@ -144,8 +145,10 @@ export function keypadTags(l: KeypadLayout): Tag[] {
 }
 
 /**
- * Dates written with two-digit years. The YYMM and MMYY tags are large (1200 PINs each) and overlap the date tag;
- * judge them by enrichment, not by share.
+ * Dates written with two-digit years, and the date tags read backwards (6202 = 2026 backwards, 8021 = 1208).
+ * Backwards variants exist only for these tags: repeats, sequences, palindromes and the keypad lines already contain
+ * their own reversal. The YYMM and MMYY tags are large (1200 PINs each) and overlap the date tag; judge them by
+ * enrichment, not by share. Keys of the backwards variants are read from the reversed digits.
  */
 export const TAGS4_DATES: Tag[] = [
   {
@@ -160,10 +163,33 @@ export const TAGS4_DATES: Tag[] = [
     test: isMonthYear,
     key: (d) => pair(d[2], d[3]),
   },
+  {
+    id: 'date-rev',
+    label: 'Date backwards (8021 = 1208)',
+    test: (d) => isDate(reversed(d)),
+  },
+  {
+    id: 'year-rev',
+    label: 'Year backwards (6202 = 2026)',
+    test: (d) => isYear(reversed(d)),
+    key: (d) => pair(d[3], d[2]) * 100 + pair(d[1], d[0]),
+  },
+  {
+    id: 'yymm-rev',
+    label: 'YYMM backwards (8067 = Aug 1976)',
+    test: (d) => isYearMonth(reversed(d)),
+    key: (d) => pair(d[3], d[2]),
+  },
+  {
+    id: 'mmyy-rev',
+    label: 'MMYY backwards (6780 = Aug 1976)',
+    test: (d) => isMonthYear(reversed(d)),
+    key: (d) => pair(d[1], d[0]),
+  },
 ];
 
 /**
- * 6 pattern tags + 10 keypad tags + 2 date tags = 18. Append only: the position is the bit and the old numeric
+ * 6 pattern tags + 10 keypad tags + 6 date variants = 22. Append only: the position is the bit and the old numeric
  * `t=` links depend on the first 15. Tags are addressed by bit (`1 << index`) in a Uint32Array, so up to 31 fit.
  */
 export const TAGS4_ALL: Tag[] = [...TAGS4, ...keypadTags(NUMPAD), ...TAGS4_DATES];
