@@ -23,20 +23,22 @@ const validDayMonth = (day: number, month: number) =>
   month >= 1 && month <= 12 && day >= 1 && day <= DAYS_IN_MONTH[month - 1];
 const pair = (a: number, b: number) => a * 10 + b;
 
+const isDate = (d: number[]) => validDayMonth(pair(d[0], d[1]), pair(d[2], d[3])) || validDayMonth(pair(d[2], d[3]), pair(d[0], d[1]));
+const isYear = (d: number[]) => {
+  const y = d[0] * 1000 + d[1] * 100 + d[2] * 10 + d[3];
+  return y >= 1900 && y <= 2029;
+};
+
 export const TAGS4: Tag[] = [
   {
     id: 'date',
     label: 'Date (DDMM / MMDD)',
-    test: (d) =>
-      validDayMonth(pair(d[0], d[1]), pair(d[2], d[3])) || validDayMonth(pair(d[2], d[3]), pair(d[0], d[1])),
+    test: isDate,
   },
   {
     id: 'year',
     label: 'Year 1900–2029',
-    test: (d) => {
-      const y = d[0] * 1000 + d[1] * 100 + d[2] * 10 + d[3];
-      return y >= 1900 && y <= 2029;
-    },
+    test: isYear,
   },
   {
     id: 'repeat',
