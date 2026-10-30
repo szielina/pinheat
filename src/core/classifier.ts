@@ -16,6 +16,11 @@ export interface Tag {
   id: string;
   label: string;
   test(d: number[]): boolean;
+  /**
+   * Position of a matching PIN on the tag's ordered axis (a year, or a two-digit year), for series charts (T06).
+   * Only tags with such an axis have it; it is meant for PINs where `test` is true.
+   */
+  key?(d: number[]): number;
 }
 
 const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
@@ -39,6 +44,7 @@ export const TAGS4: Tag[] = [
     id: 'year',
     label: 'Year 1900–2029',
     test: isYear,
+    key: (d) => d[0] * 1000 + d[1] * 100 + d[2] * 10 + d[3],
   },
   {
     id: 'repeat',
