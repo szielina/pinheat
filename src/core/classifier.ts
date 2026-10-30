@@ -33,6 +33,11 @@ const isYear = (d: number[]) => {
   const y = d[0] * 1000 + d[1] * 100 + d[2] * 10 + d[3];
   return y >= 1900 && y <= 2029;
 };
+const isMonth = (a: number, b: number) => pair(a, b) >= 1 && pair(a, b) <= 12;
+/** Two-digit year then month (7608 = August 1976). Every year is allowed, so only the month limits it. */
+const isYearMonth = (d: number[]) => isMonth(d[2], d[3]);
+/** Month then two-digit year (0876 = August 1976). */
+const isMonthYear = (d: number[]) => isMonth(d[0], d[1]);
 
 export const TAGS4: Tag[] = [
   {
@@ -138,8 +143,30 @@ export function keypadTags(l: KeypadLayout): Tag[] {
   ];
 }
 
-/** 6 pattern tags + 10 keypad tags = 16. Tags are addressed by bit (`1 << index`) in a Uint32Array, so up to 31 fit. */
-export const TAGS4_ALL: Tag[] = [...TAGS4, ...keypadTags(NUMPAD)];
+/**
+ * Dates written with two-digit years. The YYMM and MMYY tags are large (1200 PINs each) and overlap the date tag;
+ * judge them by enrichment, not by share.
+ */
+export const TAGS4_DATES: Tag[] = [
+  {
+    id: 'yymm',
+    label: 'Year + month, YYMM (7608 = Aug 1976)',
+    test: isYearMonth,
+    key: (d) => pair(d[0], d[1]),
+  },
+  {
+    id: 'mmyy',
+    label: 'Month + year, MMYY (0876 = Aug 1976)',
+    test: isMonthYear,
+    key: (d) => pair(d[2], d[3]),
+  },
+];
+
+/**
+ * 6 pattern tags + 10 keypad tags + 2 date tags = 18. Append only: the position is the bit and the old numeric
+ * `t=` links depend on the first 15. Tags are addressed by bit (`1 << index`) in a Uint32Array, so up to 31 fit.
+ */
+export const TAGS4_ALL: Tag[] = [...TAGS4, ...keypadTags(NUMPAD), ...TAGS4_DATES];
 
 const MAX_TAGS = 31; // bit 31 would make `1 << 31` negative
 if (TAGS4_ALL.length > MAX_TAGS) throw new Error(`too many tags for a 32-bit mask: ${TAGS4_ALL.length}`);
